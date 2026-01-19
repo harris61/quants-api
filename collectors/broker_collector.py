@@ -21,7 +21,23 @@ class BrokerSummaryCollector:
     def __init__(self, api_key: str = None):
         self.api = DatasahamAPI(api_key or DATASAHAM_API_KEY)
 
-    def get_broker_summary(self, symbol: str) -> List[Dict]:
+    def _parse_number(self, value) -> float:
+        """Parse numeric values that may be formatted as strings with commas"""
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace("+", "").strip()
+            if cleaned == "":
+                return 0.0
+            try:
+                return float(cleaned)
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    def get_broker_summary(self, symbol: str, date: datetime = None) -> List[Dict]:
         """
         Get broker summary for a stock
 
@@ -32,7 +48,17 @@ class BrokerSummaryCollector:
             List of broker activity records
         """
         try:
-            result = self.api.emiten_broker_summary(symbol)
+            if date is None:
+                date = datetime.now()
+            date_str = date.strftime("%Y-%m-%d")
+            result = self.api.emiten_broker_summary(
+                symbol,
+                from_date=date_str,
+                to_date=date_str,
+                transaction_type="TRANSACTION_TYPE_NET",
+                market_board="MARKET_BOARD_ALL",
+                investor_type="INVESTOR_TYPE_ALL",
+            )
             # Handle various response structures
             if isinstance(result, list):
                 return result
@@ -43,6 +69,55 @@ class BrokerSummaryCollector:
                     broker_list = result.get("data", {}).get("broker_list", [])
                 if not broker_list:
                     broker_list = result.get("brokers", [])
+                if not broker_list:
+                    broker_list = result.get("data", {}).get("data", [])
+                if not broker_list:
+                    summary = result.get("data", {}).get("broker_summary")
+                    if isinstance(summary, dict):
+                        broker_map = {}
+                        for item in summary.get("brokers_buy", []):
+                            code = item.get("netbs_broker_code") or item.get("broker_code")
+                            if not code:
+                                continue
+                            broker_map.setdefault(code, {})
+                            broker_map[code].update({
+                                "broker_code": code,
+                                "buy_value": self._parse_number(item.get("bval")),
+                                "buy_volume": self._parse_number(item.get("blotv")),
+                                "buy_frequency": abs(int(self._parse_number(item.get("blot")))),
+                            })
+                        for item in summary.get("brokers_sell", []):
+                            code = item.get("netbs_broker_code") or item.get("broker_code")
+                            if not code:
+                                continue
+                            broker_map.setdefault(code, {})
+                            sell_value = abs(self._parse_number(item.get("sval")))
+                            sell_volume = abs(self._parse_number(item.get("slotv")))
+                            sell_freq = abs(int(self._parse_number(item.get("slot"))))
+                            broker_map[code].update({
+                                "broker_code": code,
+                                "sell_value": sell_value,
+                                "sell_volume": sell_volume,
+                                "sell_frequency": sell_freq,
+                            })
+
+                        broker_list = []
+                        for code, values in broker_map.items():
+                            buy_value = values.get("buy_value", 0.0)
+                            sell_value = values.get("sell_value", 0.0)
+                            buy_volume = values.get("buy_volume", 0.0)
+                            sell_volume = values.get("sell_volume", 0.0)
+                            broker_list.append({
+                                "broker_code": code,
+                                "buy_value": buy_value,
+                                "sell_value": sell_value,
+                                "net_value": buy_value - sell_value,
+                                "buy_volume": buy_volume,
+                                "sell_volume": sell_volume,
+                                "net_volume": buy_volume - sell_volume,
+                                "buy_frequency": values.get("buy_frequency", 0),
+                                "sell_frequency": values.get("sell_frequency", 0),
+                            })
                 if not broker_list and "data" in result:
                     data = result.get("data")
                     if isinstance(data, list):
@@ -71,14 +146,14 @@ class BrokerSummaryCollector:
                 "date": date.date() if isinstance(date, datetime) else date,
                 "broker_code": broker_code,
                 "broker_name": broker.get("broker_name") or broker.get("name") or broker.get("brokerName"),
-                "buy_value": broker.get("buy_value") or broker.get("bval") or broker.get("buyValue") or 0,
-                "sell_value": broker.get("sell_value") or broker.get("sval") or broker.get("sellValue") or 0,
-                "net_value": broker.get("net_value") or broker.get("nval") or broker.get("netValue") or 0,
-                "buy_volume": broker.get("buy_volume") or broker.get("bvol") or broker.get("buyVolume") or 0,
-                "sell_volume": broker.get("sell_volume") or broker.get("svol") or broker.get("sellVolume") or 0,
-                "net_volume": broker.get("net_volume") or broker.get("nvol") or broker.get("netVolume") or 0,
-                "buy_frequency": broker.get("buy_frequency") or broker.get("bfreq") or broker.get("buyFreq") or 0,
-                "sell_frequency": broker.get("sell_frequency") or broker.get("sfreq") or broker.get("sellFreq") or 0,
+                "buy_value": self._parse_number(broker.get("buy_value") or broker.get("bval") or broker.get("buyValue")),
+                "sell_value": self._parse_number(broker.get("sell_value") or broker.get("sval") or broker.get("sellValue")),
+                "net_value": self._parse_number(broker.get("net_value") or broker.get("nval") or broker.get("netValue")),
+                "buy_volume": self._parse_number(broker.get("buy_volume") or broker.get("bvol") or broker.get("buyVolume")),
+                "sell_volume": self._parse_number(broker.get("sell_volume") or broker.get("svol") or broker.get("sellVolume")),
+                "net_volume": self._parse_number(broker.get("net_volume") or broker.get("nvol") or broker.get("netVolume")),
+                "buy_frequency": int(self._parse_number(broker.get("buy_frequency") or broker.get("bfreq") or broker.get("buyFreq"))),
+                "sell_frequency": int(self._parse_number(broker.get("sell_frequency") or broker.get("sfreq") or broker.get("sellFreq"))),
             })
         return parsed
 
@@ -130,7 +205,7 @@ class BrokerSummaryCollector:
 
         for symbol in iterator:
             try:
-                broker_data = self.get_broker_summary(symbol)
+                broker_data = self.get_broker_summary(symbol, date=today)
 
                 if broker_data:
                     parsed = self.parse_broker_data(broker_data, today)

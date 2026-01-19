@@ -93,6 +93,13 @@ class FeaturePipeline:
             df = pd.DataFrame(data)
             df['date'] = pd.to_datetime(df['date'])
             df.set_index('date', inplace=True)
+            numeric_cols = [
+                'open', 'high', 'low', 'close', 'volume', 'value', 'frequency',
+                'foreign_buy', 'foreign_sell', 'foreign_net'
+            ]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
             return df
 
     def extract_features_for_stock(self, df: pd.DataFrame, symbol: str = None) -> pd.DataFrame:
@@ -272,10 +279,10 @@ class FeaturePipeline:
         X = X.loc[common_idx]
         y = y.loc[common_idx]
 
-        # Drop rows with NaN in features
-        valid_mask = ~(X.isna().any(axis=1) | y.isna())
-        X = X[valid_mask]
-        y = y[valid_mask]
+        # Drop rows with NaN labels only; features will be imputed later
+        valid_mask = ~y.isna()
+        X = X.loc[valid_mask]
+        y = y.loc[valid_mask]
 
         print(f"\nDataset built:")
         print(f"  Total samples: {len(X)}")

@@ -4,6 +4,7 @@ Database connection and session management for Quants-API
 
 from contextlib import contextmanager
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker, Session
 
 from config import DATABASE_URL
@@ -23,7 +24,11 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 def init_db():
     """Initialize database - create all tables"""
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except OperationalError as exc:
+        if "already exists" not in str(exc):
+            raise
     print(f"Database initialized at: {DATABASE_URL}")
 
 

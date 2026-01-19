@@ -20,12 +20,46 @@ class StockListCollector:
     def get_all_sectors(self) -> List[Dict[str, Any]]:
         """Get list of all sectors"""
         result = self.api.sectors()
-        return result.get("data", [])
+        if isinstance(result, dict):
+            data = result.get("data", result)
+            if isinstance(data, dict):
+                return data.get("data", [])
+            if isinstance(data, list):
+                return data
+        return result if isinstance(result, list) else []
 
     def get_stocks_by_sector(self, sector_id: str) -> List[Dict[str, Any]]:
         """Get all stocks in a specific sector"""
-        result = self.api.sector_stocks(sector_id)
-        return result.get("data", {}).get("stocks", [])
+        subsectors = self.get_subsectors_by_sector(sector_id)
+        all_companies = []
+        for subsector in subsectors:
+            subsector_id = subsector.get("id")
+            companies = self.get_companies_by_subsector(sector_id, subsector_id)
+            all_companies.extend(companies)
+            time.sleep(API_RATE_LIMIT)
+        return all_companies
+
+    def get_subsectors_by_sector(self, sector_id: str) -> List[Dict[str, Any]]:
+        """Get subsectors in a specific sector"""
+        result = self.api.sector_subsectors(sector_id)
+        if isinstance(result, dict):
+            data = result.get("data", result)
+            if isinstance(data, dict):
+                return data.get("data", [])
+            if isinstance(data, list):
+                return data
+        return result if isinstance(result, list) else []
+
+    def get_companies_by_subsector(self, sector_id: str, subsector_id: str) -> List[Dict[str, Any]]:
+        """Get companies in a specific subsector"""
+        result = self.api.sector_subsector_companies(sector_id, subsector_id)
+        if isinstance(result, dict):
+            data = result.get("data", result)
+            if isinstance(data, dict):
+                return data.get("data", [])
+            if isinstance(data, list):
+                return data
+        return result if isinstance(result, list) else []
 
     def collect_all_stocks(self) -> List[Dict[str, Any]]:
         """

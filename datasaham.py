@@ -127,11 +127,19 @@ class DatasahamAPI:
 
     def sectors(self) -> Dict[str, Any]:
         """Daftar semua sektor"""
-        return self._request("sectors")
+        return self._request("sectors/")
 
     def sector_stocks(self, sector_id: str) -> Dict[str, Any]:
         """Daftar saham dalam sektor tertentu"""
         return self._request(f"sectors/{sector_id}/stocks")
+
+    def sector_subsectors(self, sector_id: str) -> Dict[str, Any]:
+        """Daftar subsektor dalam sektor tertentu"""
+        return self._request(f"sectors/{sector_id}/subsectors")
+
+    def sector_subsector_companies(self, sector_id: str, subsector_id: str) -> Dict[str, Any]:
+        """Daftar emiten dalam subsektor tertentu"""
+        return self._request(f"sectors/{sector_id}/subsectors/{subsector_id}/companies")
 
     def sector_performance(self, sector_id: str) -> Dict[str, Any]:
         """Performa sektor"""
@@ -174,9 +182,30 @@ class DatasahamAPI:
         """Data keuangan perusahaan"""
         return self._request(f"emiten/{symbol}/financials")
 
-    def emiten_broker_summary(self, symbol: str) -> Dict[str, Any]:
+    def emiten_broker_summary(
+        self,
+        symbol: str,
+        from_date: str = None,
+        to_date: str = None,
+        transaction_type: str = "TRANSACTION_TYPE_NET",
+        market_board: str = "MARKET_BOARD_ALL",
+        investor_type: str = "INVESTOR_TYPE_ALL",
+        limit: int = 25
+    ) -> Dict[str, Any]:
         """Ringkasan aktivitas broker"""
-        return self._request(f"emiten/{symbol}/broker-summary")
+        if from_date is None or to_date is None:
+            today = datetime.now().strftime("%Y-%m-%d")
+            from_date = from_date or today
+            to_date = to_date or today
+        params = {
+            "from": from_date,
+            "to": to_date,
+            "transactionType": transaction_type,
+            "marketBoard": market_board,
+            "investorType": investor_type,
+            "limit": limit,
+        }
+        return self._request(f"market-detector/broker-summary/{symbol}", params)
 
     def emiten_insider(self, symbol: str) -> Dict[str, Any]:
         """Data insider trading"""

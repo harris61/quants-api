@@ -3,7 +3,7 @@ SQLAlchemy Database Models for Quants-API
 Indonesian Stock Market ML Prediction System
 """
 
-from datetime import datetime
+from datetime import datetime as dt
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime,
     Boolean, ForeignKey, Index, UniqueConstraint
@@ -24,8 +24,8 @@ class Stock(Base):
     sector_name = Column(String(100))
     listing_date = Column(Date)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
+    updated_at = Column(DateTime, default=dt.utcnow, onupdate=dt.utcnow)
 
     # Relationships
     daily_prices = relationship("DailyPrice", back_populates="stock", cascade="all, delete-orphan")
@@ -67,7 +67,7 @@ class DailyPrice(Base):
     change_percent = Column(Float)  # Percentage change
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     # Relationships
     stock = relationship("Stock", back_populates="daily_prices")
@@ -105,8 +105,8 @@ class Prediction(Base):
     model_version = Column(String(50))
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
+    updated_at = Column(DateTime, default=dt.utcnow, onupdate=dt.utcnow)
 
     # Relationships
     stock = relationship("Stock", back_populates="predictions")
@@ -151,7 +151,7 @@ class MarketData(Base):
     total_foreign_sell = Column(Float)
     total_foreign_net = Column(Float)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     def __repr__(self):
         return f"<MarketData(date='{self.date}', ihsg_close={self.ihsg_close})>"
@@ -177,7 +177,7 @@ class ModelMetrics(Base):
     rolling_hit_rate = Column(Float)
     rolling_avg_return = Column(Float)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     __table_args__ = (
         UniqueConstraint('date', 'model_version', name='uix_date_model'),
@@ -209,7 +209,7 @@ class CorporateAction(Base):
     value_formatted = Column(String(100))
     description = Column(String(500))
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     __table_args__ = (
         Index('ix_corporate_actions_symbol', 'symbol'),
@@ -243,7 +243,7 @@ class BrokerSummary(Base):
     buy_frequency = Column(Integer)  # Number of buy transactions
     sell_frequency = Column(Integer) # Number of sell transactions
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     # Relationships
     stock = relationship("Stock", back_populates="broker_summaries")
@@ -283,7 +283,7 @@ class InsiderTrade(Base):
 
     # Metadata
     announcement_date = Column(Date)     # Date announcement was made
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     # Relationships
     stock = relationship("Stock", back_populates="insider_trades")
@@ -317,7 +317,7 @@ class IntradayPrice(Base):
     volume = Column(Float)
     value = Column(Float)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=dt.utcnow)
 
     # Relationships
     stock = relationship("Stock", back_populates="intraday_prices")

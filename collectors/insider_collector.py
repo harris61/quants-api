@@ -44,6 +44,8 @@ class InsiderTradeCollector:
                     insider_list = result.get("insiders", [])
                 if not insider_list:
                     insider_list = result.get("transactions", [])
+                if not insider_list:
+                    insider_list = result.get("movement", [])
                 if not insider_list and "data" in result:
                     data = result.get("data")
                     if isinstance(data, list):
@@ -61,12 +63,28 @@ class InsiderTradeCollector:
         if isinstance(date_value, datetime):
             return date_value.date()
         if isinstance(date_value, str):
-            for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"]:
+            for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y", "%d %b %y"]:
                 try:
                     return datetime.strptime(date_value, fmt).date()
                 except ValueError:
                     continue
         return None
+
+    def _parse_number(self, value) -> float:
+        """Parse numeric values that may be formatted as strings with commas"""
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace("+", "").strip()
+            if cleaned == "":
+                return 0.0
+            try:
+                return float(cleaned)
+            except ValueError:
+                return 0.0
+        return 0.0
 
     def parse_insider_data(self, insider_data: List[Dict]) -> List[Dict]:
         """Parse insider data into standardized format"""
@@ -98,6 +116,7 @@ class InsiderTradeCollector:
                 insider.get("type") or
                 insider.get("transactionType") or
                 insider.get("tipe") or
+                insider.get("action_type") or
                 ""
             ).lower()
             if tx_type not in ("buy", "sell"):
@@ -109,16 +128,39 @@ class InsiderTradeCollector:
                 else:
                     tx_type = "buy"  # Default
 
+            shares_delta = self._parse_number(
+                insider.get("shares") or
+                insider.get("volume") or
+                insider.get("saham") or
+                insider.get("changes", {}).get("value")
+            )
+            price = self._parse_number(
+                insider.get("price") or
+                insider.get("harga") or
+                insider.get("price_formatted")
+            )
+            value = self._parse_number(
+                insider.get("value") or
+                insider.get("nilai")
+            )
+            if value == 0 and shares_delta and price:
+                value = shares_delta * price
+
             parsed.append({
                 "insider_name": insider_name,
                 "position": insider.get("position") or insider.get("jabatan") or insider.get("role"),
                 "relationship_type": insider.get("relationship") or insider.get("relationship_type"),
                 "transaction_type": tx_type,
                 "transaction_date": tx_date,
-                "shares": insider.get("shares") or insider.get("volume") or insider.get("saham") or 0,
-                "price": insider.get("price") or insider.get("harga") or 0,
-                "value": insider.get("value") or insider.get("nilai") or 0,
-                "shares_after": insider.get("shares_after") or insider.get("ownership_after") or insider.get("saldo"),
+                "shares": shares_delta,
+                "price": price,
+                "value": value,
+                "shares_after": self._parse_number(
+                    insider.get("shares_after") or
+                    insider.get("ownership_after") or
+                    insider.get("saldo") or
+                    insider.get("current", {}).get("value")
+                ),
                 "announcement_date": self.parse_date(insider.get("announcement_date")),
             })
         return parsed
