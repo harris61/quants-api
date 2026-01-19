@@ -13,17 +13,38 @@ from features.price_features import PriceFeatures
 from features.volume_features import VolumeFeatures
 from features.foreign_features import ForeignFlowFeatures
 from features.technical import TechnicalFeatures
+from features.broker_features import BrokerFeatures
+from features.insider_features import InsiderFeatures
+from features.intraday_features import IntradayFeatures
 from config import TOP_GAINER_THRESHOLD, MIN_TRAINING_SAMPLES
 
 
 class FeaturePipeline:
     """Pipeline to extract features and create training dataset"""
 
-    def __init__(self):
+    def __init__(
+        self,
+        include_broker: bool = True,
+        include_insider: bool = True,
+        include_intraday: bool = True
+    ):
+        # Core extractors (always included)
         self.price_extractor = PriceFeatures()
         self.volume_extractor = VolumeFeatures()
         self.foreign_extractor = ForeignFlowFeatures()
         self.technical_extractor = TechnicalFeatures()
+
+        # Optional extractors (new data sources)
+        self.include_broker = include_broker
+        self.include_insider = include_insider
+        self.include_intraday = include_intraday
+
+        if include_broker:
+            self.broker_extractor = BrokerFeatures()
+        if include_insider:
+            self.insider_extractor = InsiderFeatures()
+        if include_intraday:
+            self.intraday_extractor = IntradayFeatures()
 
     def load_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
@@ -74,12 +95,13 @@ class FeaturePipeline:
             df.set_index('date', inplace=True)
             return df
 
-    def extract_features_for_stock(self, df: pd.DataFrame) -> pd.DataFrame:
+    def extract_features_for_stock(self, df: pd.DataFrame, symbol: str = None) -> pd.DataFrame:
         """
         Extract all features for a single stock
 
         Args:
             df: DataFrame with OHLCV and foreign flow data
+            symbol: Stock symbol (needed for broker/insider/intraday data)
 
         Returns:
             DataFrame with all features
@@ -87,19 +109,42 @@ class FeaturePipeline:
         if df.empty or len(df) < 50:
             return pd.DataFrame()
 
-        # Extract features from each extractor
-        price_features = self.price_extractor.extract_all(df)
-        volume_features = self.volume_extractor.extract_all(df)
-        foreign_features = self.foreign_extractor.extract_all(df)
-        technical_features = self.technical_extractor.extract_all(df)
+        # Extract features from core extractors
+        feature_dfs = [
+            self.price_extractor.extract_all(df),
+            self.volume_extractor.extract_all(df),
+            self.foreign_extractor.extract_all(df),
+            self.technical_extractor.extract_all(df),
+        ]
+
+        # New feature extractors (require symbol for data loading)
+        if symbol:
+            if self.include_broker and hasattr(self, 'broker_extractor'):
+                try:
+                    broker_features = self.broker_extractor.extract_all(df, symbol=symbol)
+                    if not broker_features.empty:
+                        feature_dfs.append(broker_features)
+                except Exception as e:
+                    pass  # Silently skip if broker data not available
+
+            if self.include_insider and hasattr(self, 'insider_extractor'):
+                try:
+                    insider_features = self.insider_extractor.extract_all(df, symbol=symbol)
+                    if not insider_features.empty:
+                        feature_dfs.append(insider_features)
+                except Exception as e:
+                    pass  # Silently skip if insider data not available
+
+            if self.include_intraday and hasattr(self, 'intraday_extractor'):
+                try:
+                    intraday_features = self.intraday_extractor.extract_all(df, symbol=symbol)
+                    if not intraday_features.empty:
+                        feature_dfs.append(intraday_features)
+                except Exception as e:
+                    pass  # Silently skip if intraday data not available
 
         # Combine all features
-        features = pd.concat([
-            price_features,
-            volume_features,
-            foreign_features,
-            technical_features,
-        ], axis=1)
+        features = pd.concat(feature_dfs, axis=1)
 
         # Remove duplicate columns
         features = features.loc[:, ~features.columns.duplicated()]
@@ -149,8 +194,8 @@ class FeaturePipeline:
         if df.empty:
             return pd.DataFrame(), pd.Series()
 
-        # Extract features
-        features = self.extract_features_for_stock(df)
+        # Extract features (pass symbol for new extractors)
+        features = self.extract_features_for_stock(df, symbol=symbol)
         if features.empty:
             return pd.DataFrame(), pd.Series()
 
@@ -302,8 +347,8 @@ class FeaturePipeline:
                 if df.empty or len(df) < 50:
                     continue
 
-                # Extract features
-                features = self.extract_features_for_stock(df)
+                # Extract features (pass symbol for new extractors)
+                features = self.extract_features_for_stock(df, symbol=symbol)
 
                 if features.empty:
                     continue

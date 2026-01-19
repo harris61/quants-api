@@ -16,6 +16,9 @@ from database.models import (
     MarketData,
     ModelMetrics,
     CorporateAction,
+    BrokerSummary,
+    InsiderTrade,
+    IntradayPrice,
 )
 
 __all__ = [
@@ -34,4 +37,7 @@ __all__ = [
     "MarketData",
     "ModelMetrics",
     "CorporateAction",
+    "BrokerSummary",
+    "InsiderTrade",
+    "IntradayPrice",
 ]

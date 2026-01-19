@@ -177,6 +177,33 @@ def cmd_daily_run(args):
     run_daily_workflow(send_telegram=not args.no_telegram)
 
 
+def cmd_collect_broker(args):
+    """Collect broker summary data"""
+    from collectors import BrokerSummaryCollector
+
+    init_db()
+    collector = BrokerSummaryCollector()
+    collector.collect_today()
+
+
+def cmd_collect_insider(args):
+    """Collect insider trading data"""
+    from collectors import InsiderTradeCollector
+
+    init_db()
+    collector = InsiderTradeCollector()
+    collector.collect_and_save()
+
+
+def cmd_collect_intraday(args):
+    """Collect intraday OHLCV data"""
+    from collectors import IntradayCollector
+
+    init_db()
+    collector = IntradayCollector()
+    collector.collect_and_save(days=args.days)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quants-API - Indonesian Stock Market ML Prediction System",
@@ -244,6 +271,16 @@ Examples:
     daily_parser = subparsers.add_parser("daily", help="Run complete daily workflow")
     daily_parser.add_argument("--no-telegram", action="store_true", help="Skip Telegram notification")
 
+    # Collect broker data command
+    broker_parser = subparsers.add_parser("collect-broker", help="Collect broker summary data")
+
+    # Collect insider data command
+    insider_parser = subparsers.add_parser("collect-insider", help="Collect insider trading data")
+
+    # Collect intraday data command
+    intraday_parser = subparsers.add_parser("collect-intraday", help="Collect intraday OHLCV data")
+    intraday_parser.add_argument("--days", type=int, default=5, help="Days of intraday data to collect")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -255,6 +292,9 @@ Examples:
         "init": cmd_init,
         "collect-stocks": cmd_collect_stocks,
         "collect-data": cmd_collect_data,
+        "collect-broker": cmd_collect_broker,
+        "collect-insider": cmd_collect_insider,
+        "collect-intraday": cmd_collect_intraday,
         "load-historical": cmd_load_historical,
         "train": cmd_train,
         "predict": cmd_predict,

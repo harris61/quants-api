@@ -68,3 +68,21 @@ NOTIFICATION_CONFIDENCE_THRESHOLD = 0.5
 # ==================== LOGGING ====================
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = LOGS_DIR / "quants.log"
+
+# ==================== NEW DATA SOURCES ====================
+# Broker summary collection
+BROKER_COLLECTION_ENABLED = True
+
+# Insider trading collection (less frequent)
+INSIDER_COLLECTION_ENABLED = True
+INSIDER_COLLECTION_DAY = 0  # Monday (0=Mon, 6=Sun)
+
+# Intraday data settings
+INTRADAY_COLLECTION_ENABLED = True
+INTRADAY_INTERVAL = "1h"  # Hourly candles
+INTRADAY_DAYS = 5  # Days of intraday data to keep
+
+# Feature pipeline settings
+INCLUDE_BROKER_FEATURES = True
+INCLUDE_INSIDER_FEATURES = True
+INCLUDE_INTRADAY_FEATURES = True

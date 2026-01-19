@@ -10,7 +10,13 @@ import time as time_module
 from typing import Optional
 
 from database import init_db
-from collectors import DailyDataCollector, HistoricalDataLoader
+from collectors import (
+    DailyDataCollector,
+    HistoricalDataLoader,
+    BrokerSummaryCollector,
+    InsiderTradeCollector,
+    IntradayCollector,
+)
 from models.predictor import Predictor
 from notifications import TelegramNotifier
 from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT
@@ -75,6 +81,43 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     except Exception as e:
         logger.error(f"Data collection failed: {e}")
         results["errors"].append(f"Data collection: {e}")
+
+    # Step 1b: Collect broker summary data
+    logger.info("\n[Step 1b] Collecting broker summary data...")
+    try:
+        broker_collector = BrokerSummaryCollector()
+        broker_stats = broker_collector.collect_today()
+        results["broker_collected"] = broker_stats["success"] > 0
+        results["broker_stats"] = broker_stats
+        logger.info(f"Broker collection: {broker_stats['success']} stocks, {broker_stats['records']} records")
+    except Exception as e:
+        logger.error(f"Broker collection failed: {e}")
+        results["errors"].append(f"Broker collection: {e}")
+
+    # Step 1c: Collect intraday data
+    logger.info("\n[Step 1c] Collecting intraday data...")
+    try:
+        intraday_collector = IntradayCollector()
+        intraday_stats = intraday_collector.collect_today()
+        results["intraday_collected"] = intraday_stats["success"] > 0
+        results["intraday_stats"] = intraday_stats
+        logger.info(f"Intraday collection: {intraday_stats['success']} stocks, {intraday_stats['records']} records")
+    except Exception as e:
+        logger.error(f"Intraday collection failed: {e}")
+        results["errors"].append(f"Intraday collection: {e}")
+
+    # Step 1d: Collect insider data (weekly - Monday only)
+    if datetime.now().weekday() == 0:  # Monday
+        logger.info("\n[Step 1d] Collecting insider trading data (weekly)...")
+        try:
+            insider_collector = InsiderTradeCollector()
+            insider_stats = insider_collector.collect_and_save()
+            results["insider_collected"] = insider_stats["success"] > 0
+            results["insider_stats"] = insider_stats
+            logger.info(f"Insider collection: {insider_stats['success']} stocks, {insider_stats['new_records']} new records")
+        except Exception as e:
+            logger.error(f"Insider collection failed: {e}")
+            results["errors"].append(f"Insider collection: {e}")
 
     # Step 2: Update yesterday's prediction results
     logger.info("\n[Step 2] Updating prediction results...")

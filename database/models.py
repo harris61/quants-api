@@ -30,6 +30,9 @@ class Stock(Base):
     # Relationships
     daily_prices = relationship("DailyPrice", back_populates="stock", cascade="all, delete-orphan")
     predictions = relationship("Prediction", back_populates="stock", cascade="all, delete-orphan")
+    broker_summaries = relationship("BrokerSummary", back_populates="stock", cascade="all, delete-orphan")
+    insider_trades = relationship("InsiderTrade", back_populates="stock", cascade="all, delete-orphan")
+    intraday_prices = relationship("IntradayPrice", back_populates="stock", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Stock(symbol='{self.symbol}', name='{self.name}')>"
@@ -216,3 +219,115 @@ class CorporateAction(Base):
 
     def __repr__(self):
         return f"<CorporateAction(symbol='{self.symbol}', type='{self.action_type}', ex_date='{self.ex_date}')>"
+
+
+class BrokerSummary(Base):
+    """Daily broker activity per stock"""
+    __tablename__ = "broker_summaries"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+    date = Column(Date, nullable=False)
+
+    # Broker identification
+    broker_code = Column(String(10), nullable=False)
+    broker_name = Column(String(100))
+
+    # Activity data
+    buy_value = Column(Float)        # Total buy value
+    sell_value = Column(Float)       # Total sell value
+    net_value = Column(Float)        # Net (buy - sell)
+    buy_volume = Column(Float)       # Total buy volume
+    sell_volume = Column(Float)      # Total sell volume
+    net_volume = Column(Float)       # Net volume
+    buy_frequency = Column(Integer)  # Number of buy transactions
+    sell_frequency = Column(Integer) # Number of sell transactions
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    stock = relationship("Stock", back_populates="broker_summaries")
+
+    __table_args__ = (
+        UniqueConstraint('stock_id', 'date', 'broker_code', name='uix_stock_date_broker'),
+        Index('ix_broker_summaries_stock_date', 'stock_id', 'date'),
+        Index('ix_broker_summaries_broker', 'broker_code'),
+        Index('ix_broker_summaries_date', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<BrokerSummary(stock_id={self.stock_id}, date='{self.date}', broker='{self.broker_code}')>"
+
+
+class InsiderTrade(Base):
+    """Insider trading transactions"""
+    __tablename__ = "insider_trades"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+
+    # Insider identification
+    insider_name = Column(String(255), nullable=False)
+    position = Column(String(100))       # Position/role in company
+    relationship_type = Column(String(100))   # Relationship to company
+
+    # Transaction details
+    transaction_type = Column(String(20), nullable=False)  # 'buy' or 'sell'
+    transaction_date = Column(Date, nullable=False)
+    shares = Column(Float)               # Number of shares
+    price = Column(Float)                # Transaction price
+    value = Column(Float)                # Total value (shares * price)
+
+    # Ownership after transaction
+    shares_after = Column(Float)         # Shares owned after transaction
+
+    # Metadata
+    announcement_date = Column(Date)     # Date announcement was made
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    stock = relationship("Stock", back_populates="insider_trades")
+
+    __table_args__ = (
+        Index('ix_insider_trades_stock', 'stock_id'),
+        Index('ix_insider_trades_date', 'transaction_date'),
+        Index('ix_insider_trades_type', 'transaction_type'),
+        Index('ix_insider_trades_insider', 'insider_name'),
+    )
+
+    def __repr__(self):
+        return f"<InsiderTrade(stock_id={self.stock_id}, insider='{self.insider_name}', type='{self.transaction_type}')>"
+
+
+class IntradayPrice(Base):
+    """Hourly OHLCV data"""
+    __tablename__ = "intraday_prices"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+    datetime = Column(DateTime, nullable=False)  # Full timestamp
+    date = Column(Date, nullable=False)          # Date part for easier querying
+    hour = Column(Integer, nullable=False)       # Hour (9-16 for IDX)
+
+    # OHLCV data
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    volume = Column(Float)
+    value = Column(Float)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    stock = relationship("Stock", back_populates="intraday_prices")
+
+    __table_args__ = (
+        UniqueConstraint('stock_id', 'datetime', name='uix_stock_datetime'),
+        Index('ix_intraday_prices_stock_date', 'stock_id', 'date'),
+        Index('ix_intraday_prices_datetime', 'datetime'),
+        Index('ix_intraday_prices_date', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<IntradayPrice(stock_id={self.stock_id}, datetime='{self.datetime}', close={self.close})>"
