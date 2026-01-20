@@ -204,6 +204,15 @@ def cmd_collect_intraday(args):
     collector.collect_and_save(days=args.days)
 
 
+def cmd_collect_movers(args):
+    """Collect daily mover lists"""
+    from collectors import MarketMoversCollector
+
+    init_db()
+    collector = MarketMoversCollector()
+    collector.collect_and_save()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quants-API - Indonesian Stock Market ML Prediction System",
@@ -281,6 +290,9 @@ Examples:
     intraday_parser = subparsers.add_parser("collect-intraday", help="Collect intraday OHLCV data")
     intraday_parser.add_argument("--days", type=int, default=5, help="Days of intraday data to collect")
 
+    # Collect movers data command
+    movers_parser = subparsers.add_parser("collect-movers", help="Collect daily movers data")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -295,6 +307,7 @@ Examples:
         "collect-broker": cmd_collect_broker,
         "collect-insider": cmd_collect_insider,
         "collect-intraday": cmd_collect_intraday,
+        "collect-movers": cmd_collect_movers,
         "load-historical": cmd_load_historical,
         "train": cmd_train,
         "predict": cmd_predict,

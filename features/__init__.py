@@ -7,6 +7,7 @@ from features.technical import TechnicalFeatures
 from features.broker_features import BrokerFeatures
 from features.insider_features import InsiderFeatures
 from features.intraday_features import IntradayFeatures
+from features.mover_features import MoverFeatures
 from features.pipeline import FeaturePipeline
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "BrokerFeatures",
     "InsiderFeatures",
     "IntradayFeatures",
+    "MoverFeatures",
     "FeaturePipeline",
 ]

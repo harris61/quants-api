@@ -12,7 +12,7 @@ import lightgbm as lgb
 
 from database import session_scope, Stock, DailyPrice, Prediction
 from features.pipeline import FeaturePipeline
-from config import MODELS_DIR, TOP_PICKS_COUNT
+from config import MODELS_DIR, TOP_PICKS_COUNT, TOP_GAINER_THRESHOLD
 
 
 class Predictor:
@@ -275,9 +275,9 @@ class Predictor:
                     DailyPrice.date == date
                 ).first()
 
-                if price_data and price_data.change_percent:
-                    pred.actual_return = price_data.change_percent / 100
-                    pred.is_top_gainer = (pred.actual_return >= 0.10)
+                if price_data and price_data.open and price_data.close and price_data.open != 0:
+                    pred.actual_return = (price_data.close - price_data.open) / price_data.open
+                    pred.is_top_gainer = (pred.actual_return >= TOP_GAINER_THRESHOLD)
                     pred.is_correct = (pred.probability >= 0.5) == pred.is_top_gainer
                     updated += 1
 

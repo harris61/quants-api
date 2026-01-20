@@ -16,10 +16,11 @@ from collectors import (
     BrokerSummaryCollector,
     InsiderTradeCollector,
     IntradayCollector,
+    MarketMoversCollector,
 )
 from models.predictor import Predictor
 from notifications import TelegramNotifier
-from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT
+from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT, MOVERS_COLLECTION_ENABLED
 
 # Setup logging
 logging.basicConfig(
@@ -118,6 +119,19 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
         except Exception as e:
             logger.error(f"Insider collection failed: {e}")
             results["errors"].append(f"Insider collection: {e}")
+
+    # Step 1e: Collect market movers data
+    if MOVERS_COLLECTION_ENABLED:
+        logger.info("\n[Step 1e] Collecting market movers data...")
+        try:
+            movers_collector = MarketMoversCollector()
+            movers_stats = movers_collector.collect_and_save()
+            results["movers_collected"] = movers_stats["records"] > 0
+            results["movers_stats"] = movers_stats
+            logger.info(f"Movers collection: {movers_stats['records']} records")
+        except Exception as e:
+            logger.error(f"Movers collection failed: {e}")
+            results["errors"].append(f"Movers collection: {e}")
 
     # Step 2: Update yesterday's prediction results
     logger.info("\n[Step 2] Updating prediction results...")

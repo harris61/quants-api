@@ -3,12 +3,13 @@ Stock List Collector - Get all stock symbols from IDX
 """
 
 import time
+import re
 from typing import List, Dict, Any
 from tqdm import tqdm
 
 from datasaham import DatasahamAPI
 from database import session_scope, get_or_create_stock, Stock
-from config import DATASAHAM_API_KEY, API_RATE_LIMIT
+from config import DATASAHAM_API_KEY, API_RATE_LIMIT, EQUITY_SYMBOL_REGEX
 
 
 class StockListCollector:
@@ -16,6 +17,13 @@ class StockListCollector:
 
     def __init__(self, api_key: str = None):
         self.api = DatasahamAPI(api_key or DATASAHAM_API_KEY)
+        self._equity_pattern = re.compile(EQUITY_SYMBOL_REGEX)
+
+    def is_equity_symbol(self, symbol: str) -> bool:
+        """Return True for normal equity tickers"""
+        if not symbol:
+            return False
+        return bool(self._equity_pattern.match(symbol.upper()))
 
     def get_all_sectors(self) -> List[Dict[str, Any]]:
         """Get list of all sectors"""
@@ -84,7 +92,7 @@ class StockListCollector:
 
                 for stock in stocks:
                     symbol = stock.get("code") or stock.get("symbol")
-                    if symbol and symbol not in seen_symbols:
+                    if symbol and symbol not in seen_symbols and self.is_equity_symbol(symbol):
                         seen_symbols.add(symbol)
                         all_stocks.append({
                             "symbol": symbol,

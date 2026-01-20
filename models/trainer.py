@@ -217,6 +217,7 @@ class ModelTrainer:
 
         return metrics
 
+
     def cross_validate(
         self,
         X: pd.DataFrame,
@@ -328,6 +329,7 @@ class ModelTrainer:
         if self.feature_importance is not None:
             fi_path = os.path.join(path, f"{self.model_name}_feature_importance.csv")
             self.feature_importance.to_csv(fi_path, index=False)
+
 
         print(f"\nModel saved to: {model_path}")
         return model_path

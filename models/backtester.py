@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from database import session_scope, Stock, DailyPrice
@@ -15,7 +16,7 @@ from features.pipeline import FeaturePipeline
 from models.trainer import ModelTrainer
 from config import (
     BACKTEST_TRAIN_DAYS, BACKTEST_TEST_DAYS,
-    TOP_PICKS_COUNT, TOP_GAINER_THRESHOLD, MODELS_DIR
+    TOP_PICKS_COUNT, MODELS_DIR
 )
 
 
@@ -33,6 +34,7 @@ class Backtester:
         self.top_k = top_k or TOP_PICKS_COUNT
         self.pipeline = FeaturePipeline()
         self.results = []
+        self.pick_results = []
 
     def get_date_range(self) -> Tuple[datetime, datetime]:
         """Get available date range from database"""
@@ -49,15 +51,62 @@ class Backtester:
     def build_dataset_for_period(
         self,
         start_date: str,
-        end_date: str
+        end_date: str,
+        min_samples: int = None
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """Build dataset for a specific period"""
         X, y = self.pipeline.build_training_dataset(
             start_date=start_date,
             end_date=end_date,
+            min_samples=min_samples,
             show_progress=False
         )
         return X, y
+
+    def get_trading_dates(self, start_date: str, end_date: str) -> List[datetime]:
+        """Get sorted list of trading dates within a range"""
+        with session_scope() as session:
+            rows = session.query(DailyPrice.date).filter(
+                DailyPrice.date >= start_date,
+                DailyPrice.date <= end_date
+            ).distinct().order_by(DailyPrice.date.asc()).all()
+        return [r[0] for r in rows]
+
+    def build_next_date_map(self, dates: List[datetime]) -> Dict[datetime, datetime]:
+        """Map each trading date to the next trading date"""
+        next_map = {}
+        for i in range(len(dates) - 1):
+            next_map[dates[i]] = dates[i + 1]
+        return next_map
+
+    def build_cooldown_map(self, dates: List[datetime], cooldown_days: int = 3) -> Dict[datetime, Optional[datetime]]:
+        """Map each trade date to the next eligible trade date after settlement"""
+        next_trade = {}
+        offset = cooldown_days + 1
+        for i, date in enumerate(dates):
+            next_trade[date] = dates[i + offset] if i + offset < len(dates) else None
+        return next_trade
+
+    def load_returns_lookup(self, symbols: List[str], dates: List[datetime]) -> Dict[Tuple[str, datetime], float]:
+        """Load actual intraday returns (open -> close) for symbols on specific dates"""
+        if not symbols or not dates:
+            return {}
+
+        with session_scope() as session:
+            rows = session.query(Stock.symbol, DailyPrice.date, DailyPrice.open, DailyPrice.close).join(
+                DailyPrice, DailyPrice.stock_id == Stock.id
+            ).filter(
+                Stock.symbol.in_(symbols),
+                DailyPrice.date.in_(dates)
+            ).all()
+
+        lookup = {}
+        for symbol, date, open_price, close_price in rows:
+            if open_price is None or close_price is None or open_price == 0:
+                continue
+            lookup[(symbol, date)] = (close_price - open_price) / open_price
+
+        return lookup
 
     def run_walk_forward(
         self,
@@ -99,6 +148,7 @@ class Backtester:
 
         current_date = start_dt
         self.results = []
+        self.pick_results = []
 
         while current_date + timedelta(days=self.test_days) <= end_dt:
             # Define periods
@@ -132,19 +182,58 @@ class Backtester:
                 params['n_estimators'] = 200
                 params['early_stopping_rounds'] = 30
 
-                train_data = lgb.Dataset(X_train_clean, label=y_train_clean, feature_name=feature_names)
-                trainer.model = lgb.train(
-                    params,
-                    train_data,
-                    num_boost_round=200,
-                    callbacks=[lgb.log_evaluation(0)]
-                )
+                # Create a small validation split for early stopping
+                stratify = y_train_clean if len(np.unique(y_train_clean)) > 1 else None
+                if len(y_train_clean) >= 200:
+                    X_tr, X_val, y_tr, y_val = train_test_split(
+                        X_train_clean,
+                        y_train_clean,
+                        test_size=0.1,
+                        random_state=42,
+                        stratify=stratify
+                    )
+                    train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
+                    valid_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+                    trainer.model = lgb.train(
+                        params,
+                        train_data,
+                        valid_sets=[train_data, valid_data],
+                        valid_names=['train', 'valid'],
+                        num_boost_round=200,
+                        callbacks=[lgb.log_evaluation(0)]
+                    )
+                else:
+                    params.pop('early_stopping_rounds', None)
+                    train_data = lgb.Dataset(X_train_clean, label=y_train_clean, feature_name=feature_names)
+                    trainer.model = lgb.train(
+                        params,
+                        train_data,
+                        num_boost_round=200,
+                        callbacks=[lgb.log_evaluation(0)]
+                    )
 
-                # Build test data
-                X_test, y_test = self.build_dataset_for_period(test_start, test_end)
+                # Build test data with lookback buffer for feature calculation
+                lookback_days = 60
+                lookback_start = (datetime.strptime(test_start, "%Y-%m-%d") - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+                X_test, y_test = self.build_dataset_for_period(
+                    lookback_start,
+                    test_end,
+                    min_samples=1
+                )
 
                 if X_test.empty:
                     print(f"  No test data, skipping...")
+                    current_date += timedelta(days=step_days)
+                    continue
+                # Keep only rows within the test window
+                test_start_dt = pd.to_datetime(test_start)
+                test_end_dt = pd.to_datetime(test_end)
+                mask = (X_test.index >= test_start_dt) & (X_test.index <= test_end_dt)
+                X_test = X_test.loc[mask]
+                y_test = y_test.loc[mask]
+
+                if X_test.empty:
+                    print(f"  No test data in window, skipping...")
                     current_date += timedelta(days=step_days)
                     continue
 
@@ -165,21 +254,35 @@ class Backtester:
                 # Make predictions
                 probabilities = trainer.model.predict(X_test_clean.values)
 
-                # Create test results
+                # Create test results with date and symbol
                 test_results = pd.DataFrame({
+                    'date': X_test.index,
                     'symbol': test_symbols,
                     'probability': probabilities,
                     'actual_label': y_test.values
                 })
 
-                # Evaluate on each day in test period
-                period_results = self._evaluate_period(
-                    test_results,
-                    test_start,
-                    test_end
+                # Build target date lookup and returns
+                trading_dates = self.get_trading_dates(test_start, test_end)
+                next_date_map = self.build_next_date_map(trading_dates)
+                target_dates = list(set(next_date_map.values()))
+                returns_lookup = self.load_returns_lookup(
+                    symbols=list(set(test_results['symbol'].tolist())),
+                    dates=target_dates
                 )
 
-                self.results.extend(period_results)
+                # Evaluate on each day in test period
+                daily_results, pick_results = self._evaluate_period(
+                    test_results,
+                    test_start,
+                    test_end,
+                    next_date_map,
+                    returns_lookup,
+                    trading_dates
+                )
+
+                self.results.extend(daily_results)
+                self.pick_results.extend(pick_results)
 
             except Exception as e:
                 print(f"  Error: {e}")
@@ -199,35 +302,68 @@ class Backtester:
         self,
         test_results: pd.DataFrame,
         start_date: str,
-        end_date: str
-    ) -> List[Dict]:
-        """Evaluate predictions for a test period"""
-        results = []
+        end_date: str,
+        next_date_map: Dict[datetime, datetime],
+        returns_lookup: Dict[Tuple[str, datetime], float],
+        trading_dates: List[datetime]
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """Evaluate predictions for each day in the test period"""
+        daily_results = []
+        pick_results = []
 
-        # Sort by probability and get top K
-        test_results = test_results.sort_values('probability', ascending=False)
-        top_picks = test_results.head(self.top_k)
+        test_results['date'] = pd.to_datetime(test_results['date']).dt.date
+        unique_dates = sorted(test_results['date'].unique())
+        cooldown_map = self.build_cooldown_map(trading_dates, cooldown_days=3)
+        next_allowed_trade_date = trading_dates[0] if trading_dates else None
 
-        # Calculate metrics
-        total_predictions = len(top_picks)
-        correct_predictions = top_picks['actual_label'].sum()
-        precision = correct_predictions / total_predictions if total_predictions > 0 else 0
+        for date in unique_dates:
+            target_date = next_date_map.get(date)
+            if target_date is None or next_allowed_trade_date is None:
+                continue
+            if target_date < next_allowed_trade_date:
+                continue
 
-        # Average probability of picks
-        avg_probability = top_picks['probability'].mean()
+            day_results = test_results[test_results['date'] == date]
+            if day_results.empty:
+                continue
 
-        results.append({
-            'test_start': start_date,
-            'test_end': end_date,
-            'total_predictions': total_predictions,
-            'correct_predictions': int(correct_predictions),
-            'precision_at_k': precision,
-            'avg_probability': avg_probability,
-        })
+            day_results = day_results.sort_values('probability', ascending=False)
+            top_picks = day_results.head(self.top_k).copy()
 
-        print(f"  Precision@{self.top_k}: {precision:.4f} ({int(correct_predictions)}/{total_predictions})")
+            total_predictions = len(top_picks)
+            correct_predictions = int(top_picks['actual_label'].sum())
+            precision = correct_predictions / total_predictions if total_predictions > 0 else 0
+            avg_probability = top_picks['probability'].mean() if total_predictions > 0 else 0
 
-        return results
+            # Record pick-level results
+            for rank, (_, row) in enumerate(top_picks.iterrows(), start=1):
+                actual_return = returns_lookup.get((row['symbol'], target_date))
+                pick_results.append({
+                    'date': date,
+                    'target_date': target_date,
+                    'symbol': row['symbol'],
+                    'probability': row['probability'],
+                    'rank': rank,
+                    'actual_return': actual_return,
+                    'is_top_gainer': bool(row['actual_label']),
+                    'is_correct': bool(row['actual_label']),
+                })
+
+            daily_results.append({
+                'test_date': date,
+                'target_date': target_date,
+                'total_predictions': total_predictions,
+                'correct_predictions': correct_predictions,
+                'precision_at_k': precision,
+                'avg_probability': avg_probability,
+            })
+
+            print(f"  {date} Precision@{self.top_k}: {precision:.4f} ({correct_predictions}/{total_predictions})")
+            next_allowed_trade_date = cooldown_map.get(target_date)
+            if next_allowed_trade_date is None:
+                break
+
+        return daily_results, pick_results
 
     def _print_summary(self, results_df: pd.DataFrame) -> None:
         """Print backtest summary"""
@@ -235,7 +371,7 @@ class Backtester:
         print("BACKTEST SUMMARY")
         print("=" * 60)
 
-        print(f"\nTotal test periods: {len(results_df)}")
+        print(f"\nTotal trade days: {len(results_df)}")
         print(f"Average Precision@{self.top_k}: {results_df['precision_at_k'].mean():.4f}")
         print(f"Std Precision@{self.top_k}: {results_df['precision_at_k'].std():.4f}")
         print(f"Min Precision@{self.top_k}: {results_df['precision_at_k'].min():.4f}")
@@ -307,6 +443,16 @@ class Backtester:
         filepath = os.path.join(MODELS_DIR, filename)
         results_df.to_csv(filepath, index=False)
         print(f"\nResults saved to: {filepath}")
+
+        if self.pick_results:
+            picks_df = pd.DataFrame(self.pick_results)
+            if not picks_df.empty:
+                picks_df = picks_df.sort_values(['date', 'rank'])
+                picks_filename = filename.replace(".csv", "_picks.csv")
+                picks_path = os.path.join(MODELS_DIR, picks_filename)
+                picks_df.to_csv(picks_path, index=False)
+                print(f"Pick details saved to: {picks_path}")
+
         return filepath
 
 

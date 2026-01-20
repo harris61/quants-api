@@ -97,7 +97,7 @@ class Prediction(Base):
     rank = Column(Integer)                          # Rank among all predictions
 
     # Actual outcome (filled after target_date)
-    actual_return = Column(Float)                   # Actual return on target_date
+    actual_return = Column(Float)                   # Actual intraday return (open -> close) on target_date
     is_top_gainer = Column(Boolean)                 # Was it actually a top gainer?
     is_correct = Column(Boolean)                    # Was prediction correct?
 
@@ -331,3 +331,36 @@ class IntradayPrice(Base):
 
     def __repr__(self):
         return f"<IntradayPrice(stock_id={self.stock_id}, datetime='{self.datetime}', close={self.close})>"
+
+
+class DailyMover(Base):
+    """Daily mover lists (top value/volume/frequency/gainer/loser/foreign flow)"""
+    __tablename__ = "daily_movers"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+    date = Column(Date, nullable=False)
+
+    # Type of mover list (e.g. top_value, top_volume, top_frequency, top_gainer, top_loser, net_foreign_buy, net_foreign_sell)
+    mover_type = Column(String(50), nullable=False)
+
+    # Rank within the mover list
+    rank = Column(Integer)
+
+    # Optional score (percent, value, volume, etc.)
+    score = Column(Float)
+
+    created_at = Column(DateTime, default=dt.utcnow)
+
+    # Relationships
+    stock = relationship("Stock")
+
+    __table_args__ = (
+        UniqueConstraint('stock_id', 'date', 'mover_type', name='uix_mover_stock_date_type'),
+        Index('ix_daily_movers_stock_date', 'stock_id', 'date'),
+        Index('ix_daily_movers_date', 'date'),
+        Index('ix_daily_movers_type', 'mover_type'),
+    )
+
+    def __repr__(self):
+        return f"<DailyMover(stock_id={self.stock_id}, date='{self.date}', type='{self.mover_type}')>"

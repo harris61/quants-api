@@ -4,6 +4,7 @@ Feature Pipeline - Combine all features into training dataset
 
 import pandas as pd
 import numpy as np
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm
@@ -16,7 +17,13 @@ from features.technical import TechnicalFeatures
 from features.broker_features import BrokerFeatures
 from features.insider_features import InsiderFeatures
 from features.intraday_features import IntradayFeatures
-from config import TOP_GAINER_THRESHOLD, MIN_TRAINING_SAMPLES
+from features.mover_features import MoverFeatures
+from config import (
+    TOP_GAINER_THRESHOLD,
+    MIN_TRAINING_SAMPLES,
+    EQUITY_SYMBOL_REGEX,
+    INCLUDE_MOVER_FEATURES,
+)
 
 
 class FeaturePipeline:
@@ -26,7 +33,8 @@ class FeaturePipeline:
         self,
         include_broker: bool = True,
         include_insider: bool = True,
-        include_intraday: bool = True
+        include_intraday: bool = True,
+        include_movers: bool = True
     ):
         # Core extractors (always included)
         self.price_extractor = PriceFeatures()
@@ -38,6 +46,7 @@ class FeaturePipeline:
         self.include_broker = include_broker
         self.include_insider = include_insider
         self.include_intraday = include_intraday
+        self.include_movers = include_movers and INCLUDE_MOVER_FEATURES
 
         if include_broker:
             self.broker_extractor = BrokerFeatures()
@@ -45,6 +54,15 @@ class FeaturePipeline:
             self.insider_extractor = InsiderFeatures()
         if include_intraday:
             self.intraday_extractor = IntradayFeatures()
+        if self.include_movers:
+            self.mover_extractor = MoverFeatures()
+        self._equity_pattern = re.compile(EQUITY_SYMBOL_REGEX)
+
+    def is_equity_symbol(self, symbol: str) -> bool:
+        """Return True for normal equity tickers"""
+        if not symbol:
+            return False
+        return bool(self._equity_pattern.match(symbol.upper()))
 
     def load_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
@@ -150,6 +168,14 @@ class FeaturePipeline:
                 except Exception as e:
                     pass  # Silently skip if intraday data not available
 
+            if self.include_movers and hasattr(self, 'mover_extractor'):
+                try:
+                    mover_features = self.mover_extractor.extract_all(df, symbol=symbol)
+                    if not mover_features.empty:
+                        feature_dfs.append(mover_features)
+                except Exception:
+                    pass  # Silently skip if mover data not available
+
         # Combine all features
         features = pd.concat(feature_dfs, axis=1)
 
@@ -160,10 +186,10 @@ class FeaturePipeline:
 
     def create_labels(self, df: pd.DataFrame, threshold: float = None) -> pd.Series:
         """
-        Create labels for next-day return prediction
+        Create labels for next-day intraday return prediction (open -> close)
 
         Args:
-            df: DataFrame with 'close' column
+            df: DataFrame with 'open' and 'close' columns
             threshold: Return threshold for positive label (default: TOP_GAINER_THRESHOLD)
 
         Returns:
@@ -171,8 +197,10 @@ class FeaturePipeline:
         """
         threshold = threshold or TOP_GAINER_THRESHOLD
 
-        # Next day return
-        next_day_return = df['close'].pct_change().shift(-1)
+        # Next-day intraday return (next open -> next close)
+        next_open = df['open'].shift(-1)
+        next_close = df['close'].shift(-1)
+        next_day_return = (next_close - next_open) / next_open.replace(0, np.nan)
 
         # Binary label
         labels = (next_day_return >= threshold).astype(int)
@@ -241,7 +269,7 @@ class FeaturePipeline:
         if symbols is None:
             with session_scope() as session:
                 stocks = session.query(Stock).filter(Stock.is_active == True).all()
-                symbols = [s.symbol for s in stocks]
+                symbols = [s.symbol for s in stocks if self.is_equity_symbol(s.symbol)]
 
         if not symbols:
             print("No symbols found!")
@@ -253,6 +281,8 @@ class FeaturePipeline:
         iterator = tqdm(symbols, desc="Building dataset") if show_progress else symbols
 
         for symbol in iterator:
+            if not self.is_equity_symbol(symbol):
+                continue
             try:
                 features, labels = self.build_dataset_for_stock(
                     symbol, start_date, end_date
@@ -341,12 +371,14 @@ class FeaturePipeline:
         if symbols is None:
             with session_scope() as session:
                 stocks = session.query(Stock).filter(Stock.is_active == True).all()
-                symbols = [s.symbol for s in stocks]
+                symbols = [s.symbol for s in stocks if self.is_equity_symbol(s.symbol)]
 
         all_features = []
         iterator = tqdm(symbols, desc="Extracting latest features") if show_progress else symbols
 
         for symbol in iterator:
+            if not self.is_equity_symbol(symbol):
+                continue
             try:
                 # Load recent data (need enough for feature calculation)
                 df = self.load_stock_data(symbol)

@@ -19,6 +19,7 @@ from database.models import (
     BrokerSummary,
     InsiderTrade,
     IntradayPrice,
+    DailyMover,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "BrokerSummary",
     "InsiderTrade",
     "IntradayPrice",
+    "DailyMover",
 ]

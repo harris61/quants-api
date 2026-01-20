@@ -56,6 +56,10 @@ HISTORICAL_DAYS = 365  # 1 year
 # Rate limiting for API calls (seconds between calls)
 API_RATE_LIMIT = 0.5
 
+# ==================== SYMBOL FILTER ====================
+# Only include normal equity tickers (IDX equities are 4 uppercase letters)
+EQUITY_SYMBOL_REGEX = r"^[A-Z]{4}$"
+
 # ==================== BACKTESTING ====================
 # Walk-forward validation settings
 BACKTEST_TRAIN_DAYS = 180  # 6 months training window
@@ -86,3 +90,7 @@ INTRADAY_DAYS = 5  # Days of intraday data to keep
 INCLUDE_BROKER_FEATURES = True
 INCLUDE_INSIDER_FEATURES = True
 INCLUDE_INTRADAY_FEATURES = True
+INCLUDE_MOVER_FEATURES = True
+
+# Movers collection
+MOVERS_COLLECTION_ENABLED = True
