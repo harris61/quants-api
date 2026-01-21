@@ -142,39 +142,24 @@ class FeaturePipeline:
             self.technical_extractor.extract_all(df),
         ]
 
-        # New feature extractors (require symbol for data loading)
+        # Optional feature extractors (require symbol for data loading)
         if symbol:
-            if self.include_broker and hasattr(self, 'broker_extractor'):
-                try:
-                    broker_features = self.broker_extractor.extract_all(df, symbol=symbol)
-                    if not broker_features.empty:
-                        feature_dfs.append(broker_features)
-                except Exception as e:
-                    pass  # Silently skip if broker data not available
+            optional_extractors = [
+                ("broker", self.include_broker, getattr(self, "broker_extractor", None)),
+                ("insider", self.include_insider, getattr(self, "insider_extractor", None)),
+                ("intraday", self.include_intraday, getattr(self, "intraday_extractor", None)),
+                ("movers", self.include_movers, getattr(self, "mover_extractor", None)),
+            ]
 
-            if self.include_insider and hasattr(self, 'insider_extractor'):
+            for _, enabled, extractor in optional_extractors:
+                if not enabled or extractor is None:
+                    continue
                 try:
-                    insider_features = self.insider_extractor.extract_all(df, symbol=symbol)
-                    if not insider_features.empty:
-                        feature_dfs.append(insider_features)
-                except Exception as e:
-                    pass  # Silently skip if insider data not available
-
-            if self.include_intraday and hasattr(self, 'intraday_extractor'):
-                try:
-                    intraday_features = self.intraday_extractor.extract_all(df, symbol=symbol)
-                    if not intraday_features.empty:
-                        feature_dfs.append(intraday_features)
-                except Exception as e:
-                    pass  # Silently skip if intraday data not available
-
-            if self.include_movers and hasattr(self, 'mover_extractor'):
-                try:
-                    mover_features = self.mover_extractor.extract_all(df, symbol=symbol)
-                    if not mover_features.empty:
-                        feature_dfs.append(mover_features)
+                    extracted = extractor.extract_all(df, symbol=symbol)
+                    if not extracted.empty:
+                        feature_dfs.append(extracted)
                 except Exception:
-                    pass  # Silently skip if mover data not available
+                    pass  # Silently skip if optional data not available
 
         # Combine all features
         features = pd.concat(feature_dfs, axis=1)

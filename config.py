@@ -94,3 +94,7 @@ INCLUDE_MOVER_FEATURES = True
 
 # Movers collection
 MOVERS_COLLECTION_ENABLED = True
+
+# Movers-based trading filter (regime filter)
+MOVERS_FILTER_ENABLED = False
+MOVERS_FILTER_TYPES = ["top_value", "top_volume", "top_frequency"]

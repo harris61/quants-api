@@ -38,6 +38,7 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+analysis/
 
 # Distribution
 dist/

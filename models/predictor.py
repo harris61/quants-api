@@ -12,7 +12,13 @@ import lightgbm as lgb
 
 from database import session_scope, Stock, DailyPrice, Prediction
 from features.pipeline import FeaturePipeline
-from config import MODELS_DIR, TOP_PICKS_COUNT, TOP_GAINER_THRESHOLD
+from config import (
+    MODELS_DIR,
+    TOP_PICKS_COUNT,
+    TOP_GAINER_THRESHOLD,
+    MOVERS_FILTER_ENABLED,
+    MOVERS_FILTER_TYPES,
+)
 
 
 class Predictor:
@@ -146,6 +152,16 @@ class Predictor:
         results = results.sort_values('probability', ascending=False)
         results['rank'] = range(1, len(results) + 1)
 
+        # Optional movers-based filter (trade only in mover lists)
+        if MOVERS_FILTER_ENABLED:
+            mover_date = results['date'].iloc[0] if not results.empty else None
+            if mover_date is not None:
+                mover_symbols = self._get_mover_symbols(mover_date, MOVERS_FILTER_TYPES)
+                if mover_symbols:
+                    results = results[results['symbol'].isin(mover_symbols)].copy()
+                    results = results.sort_values('probability', ascending=False)
+                    results['rank'] = range(1, len(results) + 1)
+
         # Save to database
         if save_to_db:
             self._save_predictions(results)
@@ -159,6 +175,18 @@ class Predictor:
             print(f"  {row['rank']:2d}. {row['symbol']:6s} - Probability: {row['probability']:.4f}")
 
         return top_picks
+
+    def _get_mover_symbols(self, date, mover_types: List[str]) -> List[str]:
+        """Get symbols that are in movers list for a given date"""
+        from database import session_scope, Stock, DailyMover
+
+        with session_scope() as session:
+            rows = session.query(Stock.symbol).join(DailyMover, DailyMover.stock_id == Stock.id).filter(
+                DailyMover.date == date,
+                DailyMover.mover_type.in_(mover_types)
+            ).all()
+
+        return [r[0] for r in rows]
 
     def _save_predictions(self, results: pd.DataFrame) -> None:
         """Save predictions to database"""

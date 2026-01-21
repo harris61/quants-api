@@ -11,13 +11,14 @@ import lightgbm as lgb
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from database import session_scope, Stock, DailyPrice
+from database import session_scope, Stock, DailyPrice, DailyMover
 from features.pipeline import FeaturePipeline
 from models.trainer import ModelTrainer
 from config import (
     BACKTEST_TRAIN_DAYS, BACKTEST_TEST_DAYS,
     TOP_PICKS_COUNT, MODELS_DIR
 )
+from config import MOVERS_FILTER_ENABLED, MOVERS_FILTER_TYPES
 
 
 class Backtester:
@@ -107,6 +108,23 @@ class Backtester:
             lookup[(symbol, date)] = (close_price - open_price) / open_price
 
         return lookup
+
+    def load_movers_lookup(self, start_date: str, end_date: str) -> Dict[datetime, set]:
+        """Load movers symbols per date for filtering"""
+        if not MOVERS_FILTER_ENABLED:
+            return {}
+        with session_scope() as session:
+            rows = session.query(DailyMover.date, Stock.symbol).join(
+                Stock, Stock.id == DailyMover.stock_id
+            ).filter(
+                DailyMover.date >= start_date,
+                DailyMover.date <= end_date,
+                DailyMover.mover_type.in_(MOVERS_FILTER_TYPES)
+            ).all()
+        movers = {}
+        for date, symbol in rows:
+            movers.setdefault(date, set()).add(symbol)
+        return movers
 
     def run_walk_forward(
         self,
@@ -270,6 +288,7 @@ class Backtester:
                     symbols=list(set(test_results['symbol'].tolist())),
                     dates=target_dates
                 )
+                movers_lookup = self.load_movers_lookup(test_start, test_end)
 
                 # Evaluate on each day in test period
                 daily_results, pick_results = self._evaluate_period(
@@ -278,7 +297,8 @@ class Backtester:
                     test_end,
                     next_date_map,
                     returns_lookup,
-                    trading_dates
+                    trading_dates,
+                    movers_lookup
                 )
 
                 self.results.extend(daily_results)
@@ -305,7 +325,8 @@ class Backtester:
         end_date: str,
         next_date_map: Dict[datetime, datetime],
         returns_lookup: Dict[Tuple[str, datetime], float],
-        trading_dates: List[datetime]
+        trading_dates: List[datetime],
+        movers_lookup: Dict[datetime, set]
     ) -> Tuple[List[Dict], List[Dict]]:
         """Evaluate predictions for each day in the test period"""
         daily_results = []
@@ -326,6 +347,14 @@ class Backtester:
             day_results = test_results[test_results['date'] == date]
             if day_results.empty:
                 continue
+
+            # Optional movers filter
+            if MOVERS_FILTER_ENABLED:
+                mover_symbols = movers_lookup.get(date, set())
+                if mover_symbols:
+                    day_results = day_results[day_results['symbol'].isin(mover_symbols)]
+                    if day_results.empty:
+                        continue
 
             day_results = day_results.sort_values('probability', ascending=False)
             top_picks = day_results.head(self.top_k).copy()

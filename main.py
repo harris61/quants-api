@@ -210,7 +210,10 @@ def cmd_collect_movers(args):
 
     init_db()
     collector = MarketMoversCollector()
-    collector.collect_and_save()
+    if args.backfill:
+        collector.backfill_from_db(start_date=args.start, end_date=args.end, top_n=args.top)
+    else:
+        collector.collect_and_save()
 
 
 def main():
@@ -292,6 +295,10 @@ Examples:
 
     # Collect movers data command
     movers_parser = subparsers.add_parser("collect-movers", help="Collect daily movers data")
+    movers_parser.add_argument("--backfill", action="store_true", help="Backfill movers from DB history")
+    movers_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    movers_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    movers_parser.add_argument("--top", type=int, default=50, help="Top N per mover type")
 
     args = parser.parse_args()
 

@@ -5,6 +5,7 @@ Market Movers Collector - Collect top value/volume/frequency/gainer/loser/foreig
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import pandas as pd
 from tqdm import tqdm
 
 from datasaham import DatasahamAPI
@@ -141,6 +142,80 @@ class MarketMoversCollector:
                     score=rec["score"],
                 )
                 stats["records"] += 1
+
+        return stats
+
+    def backfill_from_db(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        top_n: int = 50
+    ) -> Dict[str, int]:
+        """
+        Backfill movers from existing daily_prices data (no API dependency)
+        """
+        stats = {"dates": 0, "records": 0}
+        from database import session_scope, Stock, DailyPrice
+
+        with session_scope() as session:
+            query = session.query(
+                DailyPrice.date,
+                Stock.symbol,
+                DailyPrice.value,
+                DailyPrice.volume,
+                DailyPrice.frequency,
+                DailyPrice.change_percent,
+                DailyPrice.foreign_net
+            ).join(Stock, Stock.id == DailyPrice.stock_id)
+
+            if start_date:
+                query = query.filter(DailyPrice.date >= start_date)
+            if end_date:
+                query = query.filter(DailyPrice.date <= end_date)
+
+            rows = query.all()
+
+        if not rows:
+            return stats
+
+        df = pd.DataFrame(rows, columns=[
+            "date", "symbol", "value", "volume", "frequency", "change_percent", "foreign_net"
+        ])
+        df["date"] = pd.to_datetime(df["date"])
+
+        mover_map = {
+            "top_value": ("value", False),
+            "top_volume": ("volume", False),
+            "top_frequency": ("frequency", False),
+            "top_gainer": ("change_percent", False),
+            "top_loser": ("change_percent", True),
+            "net_foreign_buy": ("foreign_net", False),
+            "net_foreign_sell": ("foreign_net", True),
+        }
+
+        with session_scope() as session:
+            for date, group in df.groupby("date"):
+                stats["dates"] += 1
+                for mover_type, (col, asc) in mover_map.items():
+                    if col not in group.columns:
+                        continue
+                    series = group[["symbol", col]].dropna()
+                    if series.empty:
+                        continue
+                    ranked = series.sort_values(col, ascending=asc).head(top_n)
+                    for rank, row in enumerate(ranked.itertuples(index=False), start=1):
+                        stock = get_stock_by_symbol(session, row.symbol)
+                        if not stock:
+                            continue
+                        self._upsert_mover(
+                            session,
+                            stock_id=stock.id,
+                            date=date.date(),
+                            mover_type=mover_type,
+                            rank=rank,
+                            score=float(getattr(row, col)),
+                        )
+                        stats["records"] += 1
 
         return stats
 
