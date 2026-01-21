@@ -8,15 +8,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 from database import session_scope, Stock, DailyPrice, DailyMover
 from features.pipeline import FeaturePipeline
-from models.trainer import ModelTrainer
+from models.trainer import ModelTrainer, RankingTrainer
 from config import (
     BACKTEST_TRAIN_DAYS, BACKTEST_TEST_DAYS,
-    TOP_PICKS_COUNT, MODELS_DIR
+    TOP_PICKS_COUNT, MODELS_DIR, TOP_GAINER_THRESHOLD
 )
 from config import MOVERS_FILTER_ENABLED, MOVERS_FILTER_TYPES
 
@@ -28,11 +27,13 @@ class Backtester:
         self,
         train_days: int = None,
         test_days: int = None,
-        top_k: int = None
+        top_k: int = None,
+        model_type: str = "classification"
     ):
         self.train_days = train_days or BACKTEST_TRAIN_DAYS
         self.test_days = test_days or BACKTEST_TEST_DAYS
         self.top_k = top_k or TOP_PICKS_COUNT
+        self.model_type = model_type
         self.pipeline = FeaturePipeline()
         self.results = []
         self.pick_results = []
@@ -53,14 +54,16 @@ class Backtester:
         self,
         start_date: str,
         end_date: str,
-        min_samples: int = None
+        min_samples: int = None,
+        label_type: str = "binary"
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """Build dataset for a specific period"""
         X, y = self.pipeline.build_training_dataset(
             start_date=start_date,
             end_date=end_date,
             min_samples=min_samples,
-            show_progress=False
+            show_progress=False,
+            label_type=label_type
         )
         return X, y
 
@@ -89,23 +92,34 @@ class Backtester:
         return next_trade
 
     def load_returns_lookup(self, symbols: List[str], dates: List[datetime]) -> Dict[Tuple[str, datetime], float]:
-        """Load actual intraday returns (open -> close) for symbols on specific dates"""
+        """Load actual daily returns (close -> close) for symbols on specific dates"""
         if not symbols or not dates:
             return {}
 
+        min_date = min(dates)
+        max_date = max(dates)
+        buffer_start = min_date - timedelta(days=10)
+
         with session_scope() as session:
-            rows = session.query(Stock.symbol, DailyPrice.date, DailyPrice.open, DailyPrice.close).join(
+            rows = session.query(Stock.symbol, DailyPrice.date, DailyPrice.close).join(
                 DailyPrice, DailyPrice.stock_id == Stock.id
             ).filter(
                 Stock.symbol.in_(symbols),
-                DailyPrice.date.in_(dates)
+                DailyPrice.date >= buffer_start,
+                DailyPrice.date <= max_date
             ).all()
 
+        if not rows:
+            return {}
+
+        df = pd.DataFrame(rows, columns=["symbol", "date", "close"])
+        df = df.sort_values(["symbol", "date"])
+        df["daily_return"] = df.groupby("symbol")["close"].pct_change()
+
         lookup = {}
-        for symbol, date, open_price, close_price in rows:
-            if open_price is None or close_price is None or open_price == 0:
-                continue
-            lookup[(symbol, date)] = (close_price - open_price) / open_price
+        for _, row in df.iterrows():
+            if row["date"] in dates and pd.notna(row["daily_return"]):
+                lookup[(row["symbol"], row["date"])] = float(row["daily_return"])
 
         return lookup
 
@@ -179,7 +193,8 @@ class Backtester:
 
             try:
                 # Build training data
-                X_train, y_train = self.build_dataset_for_period(train_start, train_end)
+                label_type = "return" if self.model_type == "ranking" else "binary"
+                X_train, y_train = self.build_dataset_for_period(train_start, train_end, label_type=label_type)
 
                 if X_train.empty or len(X_train) < 100:
                     print(f"  Insufficient training data, skipping...")
@@ -192,7 +207,10 @@ class Backtester:
                 )
 
                 # Train model
-                trainer = ModelTrainer()
+                if self.model_type == "ranking":
+                    trainer = RankingTrainer()
+                else:
+                    trainer = ModelTrainer()
                 trainer.feature_names = feature_names
 
                 # Quick training for backtest
@@ -200,18 +218,25 @@ class Backtester:
                 params['n_estimators'] = 200
                 params['early_stopping_rounds'] = 30
 
-                # Create a small validation split for early stopping
-                stratify = y_train_clean if len(np.unique(y_train_clean)) > 1 else None
+                # Create a small temporal validation split for early stopping
                 if len(y_train_clean) >= 200:
-                    X_tr, X_val, y_tr, y_val = train_test_split(
-                        X_train_clean,
-                        y_train_clean,
-                        test_size=0.1,
-                        random_state=42,
-                        stratify=stratify
-                    )
-                    train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
-                    valid_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+                    if self.model_type == "ranking":
+                        X_tr, X_val, y_tr, y_val, groups_tr, groups_val = trainer.prepare_data(
+                            X_train_clean, y_train_clean, test_size=0.1
+                        )
+                        train_data = lgb.Dataset(
+                            X_tr, label=y_tr, group=groups_tr, feature_name=feature_names
+                        )
+                        valid_data = lgb.Dataset(
+                            X_val, label=y_val, group=groups_val, feature_name=feature_names, reference=train_data
+                        )
+                    else:
+                        X_tr, X_val, y_tr, y_val = trainer.prepare_data(
+                            X_train_clean, y_train_clean, test_size=0.1, use_smote=False
+                        )
+                        train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
+                        valid_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+
                     trainer.model = lgb.train(
                         params,
                         train_data,
@@ -222,7 +247,18 @@ class Backtester:
                     )
                 else:
                     params.pop('early_stopping_rounds', None)
-                    train_data = lgb.Dataset(X_train_clean, label=y_train_clean, feature_name=feature_names)
+                    if self.model_type == "ranking":
+                        X_tr, _, y_tr, _, groups_tr, _ = trainer.prepare_data(
+                            X_train_clean, y_train_clean, test_size=0.1
+                        )
+                        train_data = lgb.Dataset(
+                            X_tr, label=y_tr, group=groups_tr, feature_name=feature_names
+                        )
+                    else:
+                        X_tr, _, y_tr, _ = trainer.prepare_data(
+                            X_train_clean, y_train_clean, test_size=0.1, use_smote=False
+                        )
+                        train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
                     trainer.model = lgb.train(
                         params,
                         train_data,
@@ -236,7 +272,8 @@ class Backtester:
                 X_test, y_test = self.build_dataset_for_period(
                     lookback_start,
                     test_end,
-                    min_samples=1
+                    min_samples=1,
+                    label_type=label_type
                 )
 
                 if X_test.empty:
@@ -273,11 +310,19 @@ class Backtester:
                 probabilities = trainer.model.predict(X_test_clean.values)
 
                 # Create test results with date and symbol
+                if self.model_type == "ranking":
+                    actual_return = y_test.values
+                    actual_label = (actual_return >= TOP_GAINER_THRESHOLD).astype(int)
+                else:
+                    actual_return = np.full(len(y_test), np.nan)
+                    actual_label = y_test.values
+
                 test_results = pd.DataFrame({
                     'date': X_test.index,
                     'symbol': test_symbols,
                     'probability': probabilities,
-                    'actual_label': y_test.values
+                    'actual_return': actual_return,
+                    'actual_label': actual_label
                 })
 
                 # Build target date lookup and returns
@@ -287,7 +332,7 @@ class Backtester:
                 returns_lookup = self.load_returns_lookup(
                     symbols=list(set(test_results['symbol'].tolist())),
                     dates=target_dates
-                )
+                ) if self.model_type != "ranking" else {}
                 movers_lookup = self.load_movers_lookup(test_start, test_end)
 
                 # Evaluate on each day in test period
@@ -366,7 +411,10 @@ class Backtester:
 
             # Record pick-level results
             for rank, (_, row) in enumerate(top_picks.iterrows(), start=1):
-                actual_return = returns_lookup.get((row['symbol'], target_date))
+                if pd.notna(row.get('actual_return')):
+                    actual_return = row['actual_return']
+                else:
+                    actual_return = returns_lookup.get((row['symbol'], target_date))
                 pick_results.append({
                     'date': date,
                     'target_date': target_date,
@@ -499,12 +547,14 @@ def run_backtest():
     parser.add_argument("--top-k", type=int, default=TOP_PICKS_COUNT,
                         help="Number of top predictions")
     parser.add_argument("--save", action="store_true", help="Save results to CSV")
+    parser.add_argument("--ranking", action="store_true", help="Use ranking model during backtest")
     args = parser.parse_args()
 
     backtester = Backtester(
         train_days=args.train_days,
         test_days=args.test_days,
-        top_k=args.top_k
+        top_k=args.top_k,
+        model_type="ranking" if args.ranking else "classification"
     )
 
     results = backtester.run_walk_forward(

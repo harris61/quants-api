@@ -149,10 +149,12 @@ class VolumeFeatures:
         result['vwpc'] = price_change * vol_weight
 
         # On-Balance Volume (OBV)
-        obv = (np.sign(price_change) * df['volume']).cumsum()
+        # Fix: fill first NaN with 0 to prevent NaN propagation
+        obv_direction = np.sign(price_change.fillna(0))
+        obv = (obv_direction * df['volume']).cumsum()
         result['obv'] = obv
         result['obv_ma_20'] = obv.rolling(window=20).mean()
-        result['obv_ratio'] = obv / result['obv_ma_20']
+        result['obv_ratio'] = obv / (result['obv_ma_20'] + 1e-10)
 
         # Accumulation/Distribution Line
         clv = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'] + 1e-10)
@@ -160,13 +162,14 @@ class VolumeFeatures:
         result['ad_line'] = ad
 
         # Volume-Price Trend (VPT)
-        vpt = (price_change * df['volume']).cumsum()
+        # Fix: fill first NaN with 0
+        vpt = (price_change.fillna(0) * df['volume']).cumsum()
         result['vpt'] = vpt
 
         # Chaikin Money Flow (20-day)
         mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'] + 1e-10)
         mf_volume = mf_multiplier * df['volume']
-        result['cmf_20'] = mf_volume.rolling(window=20).sum() / df['volume'].rolling(window=20).sum()
+        result['cmf_20'] = mf_volume.rolling(window=20).sum() / (df['volume'].rolling(window=20).sum() + 1e-10)
 
         return result
 

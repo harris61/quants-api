@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from typing import List
 
-from config import RETURN_PERIODS, VOLATILITY_PERIOD
+from config import RETURN_PERIODS, VOLATILITY_PERIOD, IDX_TRADING_DAYS_PER_YEAR
 
 
 class PriceFeatures:
@@ -69,8 +69,8 @@ class PriceFeatures:
             window=self.volatility_period
         ).std()
 
-        # Annualized volatility (assuming 252 trading days)
-        result['volatility_annualized'] = result[f'volatility_{self.volatility_period}d'] * np.sqrt(252)
+        # Annualized volatility (IDX has ~242 trading days per year)
+        result['volatility_annualized'] = result[f'volatility_{self.volatility_period}d'] * np.sqrt(IDX_TRADING_DAYS_PER_YEAR)
 
         return result
 

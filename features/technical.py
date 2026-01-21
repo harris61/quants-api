@@ -50,7 +50,7 @@ class TechnicalFeatures:
 
     def calculate_rsi(self, df: pd.DataFrame, periods: List[int] = None) -> pd.DataFrame:
         """
-        Calculate Relative Strength Index
+        Calculate Relative Strength Index using Wilder's smoothing method
 
         Args:
             df: DataFrame with 'close' column
@@ -68,8 +68,10 @@ class TechnicalFeatures:
             gain = delta.where(delta > 0, 0)
             loss = (-delta).where(delta < 0, 0)
 
-            avg_gain = gain.rolling(window=period).mean()
-            avg_loss = loss.rolling(window=period).mean()
+            # Use Wilder's smoothing (EMA with alpha = 1/period)
+            # This is the standard RSI calculation
+            avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
 
             rs = avg_gain / (avg_loss + 1e-10)
             result[f'rsi_{period}'] = 100 - (100 / (1 + rs))
@@ -218,7 +220,7 @@ class TechnicalFeatures:
 
     def calculate_adx(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
         """
-        Calculate Average Directional Index (ADX)
+        Calculate Average Directional Index (ADX) using Wilder's smoothing
 
         Args:
             df: DataFrame with 'high', 'low', 'close' columns
@@ -231,10 +233,10 @@ class TechnicalFeatures:
 
         # Calculate +DM and -DM
         high_diff = df['high'].diff()
-        low_diff = df['low'].diff()
+        low_diff = -df['low'].diff()  # Note: low_diff is inverted
 
         plus_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0)
-        minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), abs(low_diff), 0)
+        minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0)
 
         # True Range
         prev_close = df['close'].shift(1)
@@ -246,19 +248,20 @@ class TechnicalFeatures:
             )
         )
 
-        # Smoothed averages
-        tr_smooth = pd.Series(tr, index=df.index).rolling(window=period).sum()
-        plus_dm_smooth = pd.Series(plus_dm, index=df.index).rolling(window=period).sum()
-        minus_dm_smooth = pd.Series(minus_dm, index=df.index).rolling(window=period).sum()
+        # Use Wilder's smoothing (EMA with alpha = 1/period)
+        alpha = 1 / period
+        tr_smooth = pd.Series(tr, index=df.index).ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+        plus_dm_smooth = pd.Series(plus_dm, index=df.index).ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+        minus_dm_smooth = pd.Series(minus_dm, index=df.index).ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
         # +DI and -DI
         result['plus_di'] = (plus_dm_smooth / (tr_smooth + 1e-10)) * 100
         result['minus_di'] = (minus_dm_smooth / (tr_smooth + 1e-10)) * 100
 
-        # DX and ADX
+        # DX and ADX (ADX is smoothed DX)
         dx = (abs(result['plus_di'] - result['minus_di']) /
               (result['plus_di'] + result['minus_di'] + 1e-10)) * 100
-        result['adx'] = dx.rolling(window=period).mean()
+        result['adx'] = dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
         # Trend strength
         result['strong_trend'] = (result['adx'] > 25).astype(int)

@@ -14,6 +14,7 @@ from features.price_features import PriceFeatures
 from features.volume_features import VolumeFeatures
 from features.foreign_features import ForeignFlowFeatures
 from features.technical import TechnicalFeatures
+from features.market_features import MarketRegimeFeatures
 from features.broker_features import BrokerFeatures
 from features.insider_features import InsiderFeatures
 from features.intraday_features import IntradayFeatures
@@ -41,6 +42,7 @@ class FeaturePipeline:
         self.volume_extractor = VolumeFeatures()
         self.foreign_extractor = ForeignFlowFeatures()
         self.technical_extractor = TechnicalFeatures()
+        self.market_extractor = MarketRegimeFeatures()
 
         # Optional extractors (new data sources)
         self.include_broker = include_broker
@@ -63,6 +65,78 @@ class FeaturePipeline:
         if not symbol:
             return False
         return bool(self._equity_pattern.match(symbol.upper()))
+
+    def load_all_stock_data_batch(
+        self,
+        symbols: List[str],
+        start_date: str = None,
+        end_date: str = None
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Load stock data for multiple symbols in a single batch query.
+        Much more efficient than loading one stock at a time.
+
+        Args:
+            symbols: List of stock symbols
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+
+        Returns:
+            Dict mapping symbol -> DataFrame with OHLCV data
+        """
+        if not symbols:
+            return {}
+
+        with session_scope() as session:
+            query = session.query(
+                Stock.symbol,
+                DailyPrice.date,
+                DailyPrice.open,
+                DailyPrice.high,
+                DailyPrice.low,
+                DailyPrice.close,
+                DailyPrice.volume,
+                DailyPrice.value,
+                DailyPrice.frequency,
+                DailyPrice.foreign_buy,
+                DailyPrice.foreign_sell,
+                DailyPrice.foreign_net,
+            ).join(DailyPrice, DailyPrice.stock_id == Stock.id).filter(
+                Stock.symbol.in_([s.upper() for s in symbols])
+            )
+
+            if start_date:
+                query = query.filter(DailyPrice.date >= start_date)
+            if end_date:
+                query = query.filter(DailyPrice.date <= end_date)
+
+            query = query.order_by(Stock.symbol, DailyPrice.date)
+            rows = query.all()
+
+        if not rows:
+            return {}
+
+        # Convert to DataFrame
+        columns = [
+            'symbol', 'date', 'open', 'high', 'low', 'close',
+            'volume', 'value', 'frequency', 'foreign_buy', 'foreign_sell', 'foreign_net'
+        ]
+        df_all = pd.DataFrame(rows, columns=columns)
+
+        # Convert types
+        df_all['date'] = pd.to_datetime(df_all['date'])
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'value', 'frequency',
+                        'foreign_buy', 'foreign_sell', 'foreign_net']
+        for col in numeric_cols:
+            df_all[col] = pd.to_numeric(df_all[col], errors='coerce')
+
+        # Group by symbol and return dict
+        result = {}
+        for symbol, group in df_all.groupby('symbol'):
+            stock_df = group.drop('symbol', axis=1).set_index('date').sort_index()
+            result[symbol] = stock_df
+
+        return result
 
     def load_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
@@ -140,6 +214,7 @@ class FeaturePipeline:
             self.volume_extractor.extract_all(df),
             self.foreign_extractor.extract_all(df),
             self.technical_extractor.extract_all(df),
+            self.market_extractor.extract_all(df),
         ]
 
         # Optional feature extractors (require symbol for data loading)
@@ -167,11 +242,26 @@ class FeaturePipeline:
         # Remove duplicate columns
         features = features.loc[:, ~features.columns.duplicated()]
 
+        # Align features to be strictly prior-day data
+        features = features.shift(1)
+
         return features
+
+    def create_returns(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Create next-day daily return series (close[t] -> close[t+1]).
+
+        Args:
+            df: DataFrame with 'close' column
+
+        Returns:
+            Series of next-day returns
+        """
+        return df['close'].pct_change().shift(-1)
 
     def create_labels(self, df: pd.DataFrame, threshold: float = None) -> pd.Series:
         """
-        Create labels for next-day intraday return prediction (open -> close)
+        Create labels for next-day daily return prediction (prev close -> close)
 
         Args:
             df: DataFrame with 'open' and 'close' columns
@@ -182,10 +272,8 @@ class FeaturePipeline:
         """
         threshold = threshold or TOP_GAINER_THRESHOLD
 
-        # Next-day intraday return (next open -> next close)
-        next_open = df['open'].shift(-1)
-        next_close = df['close'].shift(-1)
-        next_day_return = (next_close - next_open) / next_open.replace(0, np.nan)
+        # Next-day daily return (close[t] -> close[t+1])
+        next_day_return = self.create_returns(df)
 
         # Binary label
         labels = (next_day_return >= threshold).astype(int)
@@ -196,7 +284,8 @@ class FeaturePipeline:
         self,
         symbol: str,
         start_date: str = None,
-        end_date: str = None
+        end_date: str = None,
+        label_type: str = "binary"
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         Build feature dataset for a single stock
@@ -207,7 +296,7 @@ class FeaturePipeline:
             end_date: End date
 
         Returns:
-            Tuple of (features DataFrame, labels Series)
+            Tuple of (features DataFrame, labels/returns Series)
         """
         # Load data
         df = self.load_stock_data(symbol, start_date, end_date)
@@ -219,8 +308,11 @@ class FeaturePipeline:
         if features.empty:
             return pd.DataFrame(), pd.Series()
 
-        # Create labels
-        labels = self.create_labels(df)
+        # Create labels or returns
+        if label_type == "return":
+            labels = self.create_returns(df)
+        else:
+            labels = self.create_labels(df)
 
         # Add symbol column
         features['symbol'] = symbol
@@ -233,7 +325,10 @@ class FeaturePipeline:
         start_date: str = None,
         end_date: str = None,
         min_samples: int = None,
-        show_progress: bool = True
+        show_progress: bool = True,
+        label_type: str = "binary",
+        use_batch_loading: bool = True,
+        include_delisted: bool = False
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         Build training dataset for multiple stocks
@@ -244,42 +339,91 @@ class FeaturePipeline:
             end_date: End date
             min_samples: Minimum samples required per stock
             show_progress: Show progress bar
+            label_type: "binary" for classification, "return" for ranking
+            use_batch_loading: Use efficient batch DB query (recommended)
+            include_delisted: Include inactive/delisted stocks to avoid survivorship bias
 
         Returns:
-            Tuple of (features DataFrame, labels Series)
+            Tuple of (features DataFrame, labels/returns Series)
         """
         min_samples = min_samples or MIN_TRAINING_SAMPLES
 
         # Get symbols from database if not provided
         if symbols is None:
             with session_scope() as session:
-                stocks = session.query(Stock).filter(Stock.is_active == True).all()
+                if include_delisted:
+                    # Include all stocks (active and inactive) to avoid survivorship bias
+                    stocks = session.query(Stock).all()
+                else:
+                    # Only active stocks (default, for prediction)
+                    stocks = session.query(Stock).filter(Stock.is_active == True).all()
                 symbols = [s.symbol for s in stocks if self.is_equity_symbol(s.symbol)]
 
         if not symbols:
             print("No symbols found!")
             return pd.DataFrame(), pd.Series()
 
+        # Filter to equity symbols only
+        symbols = [s for s in symbols if self.is_equity_symbol(s)]
+
         all_features = []
         all_labels = []
 
-        iterator = tqdm(symbols, desc="Building dataset") if show_progress else symbols
+        # Batch load all stock data in single query (much faster)
+        if use_batch_loading:
+            if show_progress:
+                print(f"Batch loading data for {len(symbols)} stocks...")
+            stock_data = self.load_all_stock_data_batch(symbols, start_date, end_date)
+            if show_progress:
+                print(f"Loaded data for {len(stock_data)} stocks")
 
-        for symbol in iterator:
-            if not self.is_equity_symbol(symbol):
-                continue
-            try:
-                features, labels = self.build_dataset_for_stock(
-                    symbol, start_date, end_date
-                )
+            iterator = tqdm(symbols, desc="Extracting features") if show_progress else symbols
 
-                if len(features) >= min_samples:
-                    all_features.append(features)
-                    all_labels.append(labels)
+            for symbol in iterator:
+                try:
+                    df = stock_data.get(symbol)
+                    if df is None or df.empty or len(df) < 50:
+                        continue
 
-            except Exception as e:
-                print(f"Error processing {symbol}: {e}")
-                continue
+                    # Extract features
+                    features = self.extract_features_for_stock(df, symbol=symbol)
+                    if features.empty:
+                        continue
+
+                    # Create labels or returns
+                    if label_type == "return":
+                        labels = self.create_returns(df)
+                    else:
+                        labels = self.create_labels(df)
+
+                    # Add symbol column
+                    features['symbol'] = symbol
+
+                    if len(features) >= min_samples:
+                        all_features.append(features)
+                        all_labels.append(labels)
+
+                except Exception as e:
+                    if show_progress:
+                        print(f"Error processing {symbol}: {e}")
+                    continue
+        else:
+            # Legacy: load one stock at a time
+            iterator = tqdm(symbols, desc="Building dataset") if show_progress else symbols
+
+            for symbol in iterator:
+                try:
+                    features, labels = self.build_dataset_for_stock(
+                        symbol, start_date, end_date, label_type=label_type
+                    )
+
+                    if len(features) >= min_samples:
+                        all_features.append(features)
+                        all_labels.append(labels)
+
+                except Exception as e:
+                    print(f"Error processing {symbol}: {e}")
+                    continue
 
         if not all_features:
             print("No valid data found!")

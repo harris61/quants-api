@@ -22,7 +22,17 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # ==================== API KEYS ====================
-DATASAHAM_API_KEY = os.getenv("DATASAHAM_API_KEY", "sbk_a05e1010d49474dba301908a72499aa96c83ee8ef869c4b3")
+# API keys must be set via environment variables or .env file
+DATASAHAM_API_KEY = os.getenv("DATASAHAM_API_KEY")
+if not DATASAHAM_API_KEY:
+    import warnings
+    warnings.warn(
+        "DATASAHAM_API_KEY not set. Please set it in .env file or environment variables. "
+        "Get your API key from https://datasaham.io",
+        UserWarning
+    )
+    DATASAHAM_API_KEY = ""  # Will fail gracefully when API is called
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
@@ -48,6 +58,10 @@ TEST_SIZE = 0.2
 RETURN_PERIODS = [1, 3, 5, 10, 20]  # days
 MA_PERIODS = [5, 10, 20, 50]  # Moving averages
 VOLATILITY_PERIOD = 20  # days
+
+# IDX trading days per year (differs from US 252)
+# Indonesia has more holidays (Eid, Nyepi, etc.)
+IDX_TRADING_DAYS_PER_YEAR = 242
 
 # ==================== DATA COLLECTION ====================
 # Historical data to collect (in days)
@@ -98,3 +112,12 @@ MOVERS_COLLECTION_ENABLED = True
 # Movers-based trading filter (regime filter)
 MOVERS_FILTER_ENABLED = False
 MOVERS_FILTER_TYPES = ["top_value", "top_volume", "top_frequency"]
+
+# ==================== TRAINING SETTINGS ====================
+# Include delisted stocks in training to avoid survivorship bias
+# Set to True for more robust backtesting
+INCLUDE_DELISTED_IN_TRAINING = True
+
+# Portfolio diversification settings
+MAX_SECTOR_CONCENTRATION = 0.4  # Max 40% of picks from one sector
+MAX_SUBSECTOR_CONCENTRATION = 0.3  # Max 30% of picks from one subsector

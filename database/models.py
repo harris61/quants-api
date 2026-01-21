@@ -97,7 +97,7 @@ class Prediction(Base):
     rank = Column(Integer)                          # Rank among all predictions
 
     # Actual outcome (filled after target_date)
-    actual_return = Column(Float)                   # Actual intraday return (open -> close) on target_date
+    actual_return = Column(Float)                   # Actual daily return (close -> close) on target_date
     is_top_gainer = Column(Boolean)                 # Was it actually a top gainer?
     is_correct = Column(Boolean)                    # Was prediction correct?
 

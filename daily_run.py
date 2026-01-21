@@ -35,8 +35,9 @@ logger = logging.getLogger(__name__)
 
 
 def is_trading_day() -> bool:
-    """Check if today is a trading day (Mon-Fri)"""
-    return datetime.now().weekday() < 5
+    """Check if today is a trading day on IDX (excludes weekends and holidays)"""
+    from utils.holidays import is_trading_day as check_trading_day
+    return check_trading_day(datetime.now().date())
 
 
 def run_daily_workflow(send_telegram: bool = True) -> dict:

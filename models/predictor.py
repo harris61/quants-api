@@ -27,6 +27,8 @@ class Predictor:
     def __init__(self, model_name: str = None, model_path: str = None):
         self.model = None
         self.feature_names = None
+        self.feature_medians = None
+        self.model_type = "classification"
         self.model_name = model_name
         self.model_path = model_path or MODELS_DIR
         self.pipeline = FeaturePipeline()
@@ -61,6 +63,8 @@ class Predictor:
             with open(metadata_file, 'r') as f:
                 metadata = json.load(f)
             self.feature_names = metadata.get('feature_names', [])
+            self.feature_medians = metadata.get('feature_medians', {})
+            self.model_type = metadata.get('model_type', 'classification')
 
         print(f"Model loaded: {self.model_name}")
 
@@ -82,26 +86,31 @@ class Predictor:
             # Add missing columns with zeros
             for col in self.feature_names:
                 if col not in X_numeric.columns:
-                    X_numeric[col] = 0
+                    X_numeric[col] = self.feature_medians.get(col, 0) if self.feature_medians else 0
 
             # Select only features used in training
             X_numeric = X_numeric[self.feature_names]
 
         # Replace inf and fill NaN
         X_clean = X_numeric.replace([np.inf, -np.inf], np.nan)
-        X_clean = X_clean.fillna(0)
+        if self.feature_medians:
+            # Fill using stored medians from training
+            X_clean = X_clean.fillna(self.feature_medians)
+        # Fill any remaining NaN with column median (edge case for new features)
+        # Then fill remaining with 0 (for completely missing columns)
+        X_clean = X_clean.fillna(X_clean.median()).fillna(0)
 
         return X_clean.values
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Get prediction probabilities
+        Get prediction scores or probabilities
 
         Args:
             X: Features DataFrame
 
         Returns:
-            Array of probabilities
+            Array of model scores
         """
         X_prepared = self.prepare_features(X)
         return self.model.predict(X_prepared)
@@ -171,8 +180,9 @@ class Predictor:
 
         print(f"\nTop {top_k} Predictions:")
         print("-" * 50)
+        value_label = "Score" if self.model_type == "ranking" else "Probability"
         for _, row in top_picks.iterrows():
-            print(f"  {row['rank']:2d}. {row['symbol']:6s} - Probability: {row['probability']:.4f}")
+            print(f"  {row['rank']:2d}. {row['symbol']:6s} - {value_label}: {row['probability']:.4f}")
 
         return top_picks
 
@@ -190,14 +200,11 @@ class Predictor:
 
     def _save_predictions(self, results: pd.DataFrame) -> None:
         """Save predictions to database"""
-        prediction_date = datetime.now().date()
-        target_date = prediction_date + timedelta(days=1)
+        from utils.holidays import next_trading_day
 
-        # Skip weekends
-        if target_date.weekday() == 5:  # Saturday
-            target_date += timedelta(days=2)
-        elif target_date.weekday() == 6:  # Sunday
-            target_date += timedelta(days=1)
+        prediction_date = datetime.now().date()
+        # Use proper holiday calendar to get next trading day
+        target_date = next_trading_day(prediction_date)
 
         with session_scope() as session:
             for _, row in results.iterrows():
@@ -303,10 +310,21 @@ class Predictor:
                     DailyPrice.date == date
                 ).first()
 
-                if price_data and price_data.open and price_data.close and price_data.open != 0:
-                    pred.actual_return = (price_data.close - price_data.open) / price_data.open
+                if price_data and price_data.close and price_data.close != 0:
+                    prior_price = session.query(DailyPrice).filter(
+                        DailyPrice.stock_id == pred.stock_id,
+                        DailyPrice.date < date
+                    ).order_by(DailyPrice.date.desc()).first()
+                    if not prior_price or not prior_price.close:
+                        continue
+
+                    pred.actual_return = (price_data.close - prior_price.close) / prior_price.close
                     pred.is_top_gainer = (pred.actual_return >= TOP_GAINER_THRESHOLD)
-                    pred.is_correct = (pred.probability >= 0.5) == pred.is_top_gainer
+
+                    if self.model_type == "ranking":
+                        pred.is_correct = (pred.rank is not None and pred.rank <= TOP_PICKS_COUNT) and pred.is_top_gainer
+                    else:
+                        pred.is_correct = (pred.probability >= 0.5) == pred.is_top_gainer
                     updated += 1
 
         print(f"Updated {updated} predictions with actual returns")

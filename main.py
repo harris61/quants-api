@@ -59,7 +59,7 @@ def cmd_load_historical(args):
 def cmd_train(args):
     """Train model"""
     from features.pipeline import FeaturePipeline
-    from models.trainer import ModelTrainer
+    from models.trainer import ModelTrainer, RankingTrainer
 
     init_db()
 
@@ -67,7 +67,8 @@ def cmd_train(args):
     pipeline = FeaturePipeline()
     X, y = pipeline.build_training_dataset(
         start_date=args.start,
-        end_date=args.end
+        end_date=args.end,
+        label_type="return" if args.ranking else "binary"
     )
 
     if X.empty:
@@ -77,8 +78,12 @@ def cmd_train(args):
     X_train, y_train, feature_names = pipeline.prepare_for_training(X, y)
 
     print(f"\nTraining model with {len(X_train)} samples...")
-    trainer = ModelTrainer(model_name=args.name)
-    trainer.train(X_train, y_train, use_smote=not args.no_smote)
+    if args.ranking:
+        trainer = RankingTrainer(model_name=args.name)
+        trainer.train(X_train, y_train)
+    else:
+        trainer = ModelTrainer(model_name=args.name)
+        trainer.train(X_train, y_train, use_smote=not args.no_smote)
 
     trainer.save()
 
@@ -113,7 +118,8 @@ def cmd_backtest(args):
     backtester = Backtester(
         train_days=args.train_days,
         test_days=args.test_days,
-        top_k=args.top_k
+        top_k=args.top_k,
+        model_type="ranking" if args.ranking else "classification"
     )
 
     results = backtester.run_walk_forward(
@@ -256,6 +262,7 @@ Examples:
     train_parser.add_argument("--end", type=str, help="Training end date")
     train_parser.add_argument("--name", type=str, help="Model name")
     train_parser.add_argument("--no-smote", action="store_true", help="Disable SMOTE")
+    train_parser.add_argument("--ranking", action="store_true", help="Train a LambdaRank model")
 
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Run predictions")
@@ -272,6 +279,7 @@ Examples:
     backtest_parser.add_argument("--test-days", type=int, default=30, help="Test window days")
     backtest_parser.add_argument("--top-k", type=int, default=10, help="Top K predictions")
     backtest_parser.add_argument("--save", action="store_true", help="Save results to CSV")
+    backtest_parser.add_argument("--ranking", action="store_true", help="Use ranking model during backtest")
 
     # Verify command
     verify_parser = subparsers.add_parser("verify", help="Verify data and model")

@@ -269,7 +269,15 @@ class DatasahamAPI:
 
 # Contoh penggunaan
 if __name__ == "__main__":
-    API_KEY = "sbk_a05e1010d49474dba301908a72499aa96c83ee8ef869c4b3"
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    API_KEY = os.getenv("DATASAHAM_API_KEY")
+    if not API_KEY:
+        print("Error: DATASAHAM_API_KEY not set in environment variables")
+        print("Please set it in .env file or export it")
+        exit(1)
 
     api = DatasahamAPI(API_KEY)
 

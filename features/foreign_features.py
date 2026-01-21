@@ -68,19 +68,19 @@ class ForeignFlowFeatures:
         else:
             return result
 
-        # Foreign buy ratio
+        # Foreign buy ratio (use small epsilon to avoid division by zero)
         if 'foreign_buy' in df.columns:
-            result['foreign_buy_ratio'] = df['foreign_buy'] / (value + 1)
+            result['foreign_buy_ratio'] = df['foreign_buy'] / (value + 1e-10)
 
         # Foreign sell ratio
         if 'foreign_sell' in df.columns:
-            result['foreign_sell_ratio'] = df['foreign_sell'] / (value + 1)
+            result['foreign_sell_ratio'] = df['foreign_sell'] / (value + 1e-10)
 
         # Net foreign ratio
         if 'foreign_net' in df.columns:
-            result['foreign_net_ratio'] = df['foreign_net'] / (value + 1)
+            result['foreign_net_ratio'] = df['foreign_net'] / (value + 1e-10)
         elif 'foreign_buy' in df.columns and 'foreign_sell' in df.columns:
-            result['foreign_net_ratio'] = (df['foreign_buy'] - df['foreign_sell']) / (value + 1)
+            result['foreign_net_ratio'] = (df['foreign_buy'] - df['foreign_sell']) / (value + 1e-10)
 
         return result
 

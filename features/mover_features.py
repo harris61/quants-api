@@ -11,14 +11,16 @@ class MoverFeatures:
     """Extract features from daily mover lists"""
 
     def __init__(self, mover_types: Optional[List[str]] = None):
+        # NOTE: top_gainer and top_loser are EXCLUDED because they are
+        # essentially the label we're trying to predict (target leakage)
         self.mover_types = mover_types or [
-            "top_gainer",
-            "top_loser",
-            "top_value",
-            "top_volume",
-            "top_frequency",
-            "net_foreign_buy",
-            "net_foreign_sell",
+            # "top_gainer",       # REMOVED - this IS the label
+            # "top_loser",        # REMOVED - inverse of label
+            "top_value",          # Liquidity signal - KEEP
+            "top_volume",         # Liquidity signal - KEEP
+            "top_frequency",      # Retail activity signal - KEEP
+            "net_foreign_buy",    # Institutional flow signal - KEEP
+            "net_foreign_sell",   # Institutional flow signal - KEEP
         ]
 
     def load_mover_data(self, symbol: str, start_date: str = None) -> pd.DataFrame:
