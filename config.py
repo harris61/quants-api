@@ -41,8 +41,8 @@ DATABASE_PATH = DATABASE_DIR / "quants.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # ==================== MODEL SETTINGS ====================
-# Label threshold for top gainer (10% = 0.10)
-TOP_GAINER_THRESHOLD = 0.10
+# Label threshold for top gainer (7% = 0.07)
+TOP_GAINER_THRESHOLD = 0.07
 
 # Number of stocks to predict as top picks
 TOP_PICKS_COUNT = 10
@@ -66,6 +66,9 @@ IDX_TRADING_DAYS_PER_YEAR = 242
 # ==================== DATA COLLECTION ====================
 # Historical data to collect (in days)
 HISTORICAL_DAYS = 365  # 1 year
+
+# Daily collection window (in days)
+DAILY_COLLECT_DAYS = 30
 
 # Rate limiting for API calls (seconds between calls)
 API_RATE_LIMIT = 0.5
@@ -121,3 +124,27 @@ INCLUDE_DELISTED_IN_TRAINING = True
 # Portfolio diversification settings
 MAX_SECTOR_CONCENTRATION = 0.4  # Max 40% of picks from one sector
 MAX_SUBSECTOR_CONCENTRATION = 0.3  # Max 30% of picks from one subsector
+
+# ==================== RULE-BASED SETTINGS ====================
+# MA rule-based daily ranking (MA20/MA50)
+RULE_BASED_MODEL_NAME = "rule_ma20_ma50_v1"
+RULE_MA_FAST = 20
+RULE_MA_SLOW = 50
+RULE_SLOPE_LOOKBACK = 5  # daily bars
+
+# Distance thresholds
+RULE_DIST20_ENTRY = 0.04
+RULE_DIST20_OVEREXTENDED = 0.08
+RULE_DIST50_FALLING_KNIFE = -0.03
+
+# Slope thresholds (flat/naik)
+RULE_SLOPE_FLAT_MIN = -0.002
+RULE_SLOPE_SCORE_FLOOR = -0.001
+RULE_SLOPE_SCORE_CEIL = 0.001
+
+# Ranking score weights (sum = 100)
+RULE_SCORE_WEIGHT_PROX = 40
+RULE_SCORE_WEIGHT_SLOPE = 25
+RULE_SCORE_WEIGHT_DIST50 = 25
+RULE_SCORE_WEIGHT_RECLAIM = 10
+RULE_SCORE_DIST50_CAP = 0.06

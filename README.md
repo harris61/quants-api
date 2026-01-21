@@ -1,14 +1,14 @@
 Quants-API
 ==========
 
-Indonesian Stock Market ML pipeline for daily top-gainer prediction (intraday open -> close).
+Indonesian Stock Market rule-based daily ranking using MA20/MA50 (long-only).
 
 Overview
 --------
 - Data sources: Datasaham API (daily OHLCV, broker summary, insider, intraday, movers)
 - Storage: SQLite (`database/quants.db`)
-- Model: LightGBM binary classifier
-- Target: next trading day intraday return >= `TOP_GAINER_THRESHOLD`
+- Strategy: MA20/MA50 rule-based filter + ranking
+- Output: top 10 ranked candidates after market close
 
 Quick Start
 -----------
@@ -22,9 +22,7 @@ Quick Start
    - `python main.py load-historical --days 365`
 5) (Optional) Backfill movers from existing daily data:
    - `python main.py collect-movers --backfill --start 2025-01-20 --end 2026-01-20 --top 50`
-6) Train model:
-   - `python main.py train --name my_model`
-7) Predict top picks:
+6) Generate ranked picks:
    - `python main.py predict --top 10`
 
 Daily Workflow
@@ -35,18 +33,8 @@ Run after market close:
 This will:
 1) Collect daily data, broker summaries, intraday, and movers
 2) Update prediction actuals
-3) Generate next-day predictions
+3) Generate next-day ranked picks
 4) Send Telegram summary (if configured)
-
-Backtesting
------------
-Walk-forward backtest with trade simulation:
-- `python main.py backtest --start 2025-10-22 --end 2026-01-20 --save`
-
-Notes:
-- Prediction target is next-day intraday return (open -> close).
-- Backtest enforces T+3 trading-day cooldown between trades.
-- Results are saved to `models/saved/*.csv`.
 
 Movers Data
 -----------
@@ -59,6 +47,7 @@ Configuration
 Edit `config.py`:
 - `TOP_GAINER_THRESHOLD`: intraday return threshold
 - `EQUITY_SYMBOL_REGEX`: filter for equity universe
+- Rule-based settings: `RULE_*`
 - Feature toggles: `INCLUDE_BROKER_FEATURES`, `INCLUDE_INSIDER_FEATURES`, `INCLUDE_INTRADAY_FEATURES`, `INCLUDE_MOVER_FEATURES`
 - Movers collection: `MOVERS_COLLECTION_ENABLED`
 

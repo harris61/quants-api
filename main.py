@@ -1,5 +1,5 @@
 """
-Quants-API - Indonesian Stock Market ML Prediction System
+Quants-API - Indonesian Stock Market Rule-Based Ranking System
 Main CLI Entry Point
 """
 
@@ -57,47 +57,18 @@ def cmd_load_historical(args):
 
 
 def cmd_train(args):
-    """Train model"""
-    from features.pipeline import FeaturePipeline
-    from models.trainer import ModelTrainer, RankingTrainer
-
-    init_db()
-
-    print("Building training dataset...")
-    pipeline = FeaturePipeline()
-    X, y = pipeline.build_training_dataset(
-        start_date=args.start,
-        end_date=args.end,
-        label_type="return" if args.ranking else "binary"
-    )
-
-    if X.empty:
-        print("No data available for training!")
-        return
-
-    X_train, y_train, feature_names = pipeline.prepare_for_training(X, y)
-
-    print(f"\nTraining model with {len(X_train)} samples...")
-    if args.ranking:
-        trainer = RankingTrainer(model_name=args.name)
-        trainer.train(X_train, y_train)
-    else:
-        trainer = ModelTrainer(model_name=args.name)
-        trainer.train(X_train, y_train, use_smote=not args.no_smote)
-
-    trainer.save()
-
-    print("\nTop 20 Important Features:")
-    print(trainer.get_top_features(20))
+    """Training disabled in rule-based system"""
+    print("Training is disabled in the rule-based system.")
+    print("Use `python main.py predict` to generate daily ranked picks.")
 
 
 def cmd_predict(args):
     """Run predictions"""
-    from models.predictor import Predictor
+    from models.rule_based import RuleBasedPredictor
 
     init_db()
 
-    predictor = Predictor(model_name=args.model)
+    predictor = RuleBasedPredictor()
     results = predictor.predict(
         top_k=args.top,
         save_to_db=not args.no_save
@@ -110,31 +81,31 @@ def cmd_predict(args):
 
 
 def cmd_backtest(args):
-    """Run backtest"""
-    from models.backtester import Backtester
+    """Backtest disabled in rule-based system"""
+    print("Backtest is disabled in the rule-based system.")
+    print("We can add rule-based backtesting in a future step.")
+
+
+def cmd_backtest_rules(args):
+    """Run rule-based backtest"""
+    from models.rule_based import RuleBasedPredictor
 
     init_db()
 
-    backtester = Backtester(
-        train_days=args.train_days,
-        test_days=args.test_days,
-        top_k=args.top_k,
-        model_type="ranking" if args.ranking else "classification"
-    )
+    predictor = RuleBasedPredictor()
+    results = predictor.backtest_last_days(days=args.days, top_k=args.top)
 
-    results = backtester.run_walk_forward(
-        start_date=args.start,
-        end_date=args.end
-    )
-
-    if args.save and not results.empty:
-        backtester.save_results(results)
+    if not results.empty:
+        print("\n" + "=" * 50)
+        print("RULE-BASED BACKTEST")
+        print("=" * 50)
+        print(results.to_string(index=False))
 
 
 def cmd_verify(args):
-    """Verify data and model"""
+    """Verify data and rule-based system"""
     from collectors import HistoricalDataLoader
-    from models.predictor import Predictor
+    from models.rule_based import RuleBasedPredictor
 
     init_db()
 
@@ -148,17 +119,16 @@ def cmd_verify(args):
     for key, value in verification.items():
         print(f"  {key}: {value}")
 
-    # Model verification
+    # Rule-based verification
     print("\n" + "=" * 50)
-    print("MODEL VERIFICATION")
+    print("RULE-BASED VERIFICATION")
     print("=" * 50)
 
     try:
-        predictor = Predictor()
-        print(f"  Model loaded: {predictor.model_name}")
-        print(f"  Features: {len(predictor.feature_names)}")
+        predictor = RuleBasedPredictor()
+        print(f"  Strategy: {predictor.model_name}")
     except Exception as e:
-        print(f"  No model available: {e}")
+        print(f"  Rule-based system error: {e}")
 
 
 def cmd_telegram_test(args):
@@ -224,16 +194,16 @@ def cmd_collect_movers(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Quants-API - Indonesian Stock Market ML Prediction System",
+        description="Quants-API - Indonesian Stock Market Rule-Based Ranking System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python main.py init                      # Initialize database
   python main.py collect-stocks            # Collect stock list
   python main.py load-historical --days 365  # Load 1 year of data
-  python main.py train                     # Train model
-  python main.py predict                   # Run predictions
-  python main.py backtest                  # Run backtest
+  python main.py train                     # (disabled) ML training
+  python main.py predict                   # Run daily ranked picks
+  python main.py backtest                  # (disabled) ML backtest
   python main.py daily                     # Run daily workflow
         """
     )
@@ -257,7 +227,7 @@ Examples:
     historical_parser.add_argument("--verify", action="store_true", help="Only verify existing data")
 
     # Train command
-    train_parser = subparsers.add_parser("train", help="Train ML model")
+    train_parser = subparsers.add_parser("train", help="(disabled) Train ML model")
     train_parser.add_argument("--start", type=str, help="Training start date")
     train_parser.add_argument("--end", type=str, help="Training end date")
     train_parser.add_argument("--name", type=str, help="Model name")
@@ -265,14 +235,13 @@ Examples:
     train_parser.add_argument("--ranking", action="store_true", help="Train a LambdaRank model")
 
     # Predict command
-    predict_parser = subparsers.add_parser("predict", help="Run predictions")
-    predict_parser.add_argument("--model", type=str, help="Model name to use")
+    predict_parser = subparsers.add_parser("predict", help="Run daily ranked picks")
     predict_parser.add_argument("--top", type=int, default=10, help="Number of top picks")
     predict_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     predict_parser.add_argument("--telegram", action="store_true", help="Send via Telegram")
 
     # Backtest command
-    backtest_parser = subparsers.add_parser("backtest", help="Run walk-forward backtest")
+    backtest_parser = subparsers.add_parser("backtest", help="(disabled) Run walk-forward backtest")
     backtest_parser.add_argument("--start", type=str, help="Backtest start date")
     backtest_parser.add_argument("--end", type=str, help="Backtest end date")
     backtest_parser.add_argument("--train-days", type=int, default=180, help="Training window days")
@@ -281,8 +250,13 @@ Examples:
     backtest_parser.add_argument("--save", action="store_true", help="Save results to CSV")
     backtest_parser.add_argument("--ranking", action="store_true", help="Use ranking model during backtest")
 
+    # Rule-based backtest command
+    rb_backtest_parser = subparsers.add_parser("backtest-rules", help="Run rule-based backtest")
+    rb_backtest_parser.add_argument("--days", type=int, default=30, help="Number of recent days to test")
+    rb_backtest_parser.add_argument("--top", type=int, default=10, help="Top K picks per day")
+
     # Verify command
-    verify_parser = subparsers.add_parser("verify", help="Verify data and model")
+    verify_parser = subparsers.add_parser("verify", help="Verify data and rule-based system")
 
     # Telegram test command
     telegram_parser = subparsers.add_parser("telegram-test", help="Test Telegram notification")
@@ -327,6 +301,7 @@ Examples:
         "train": cmd_train,
         "predict": cmd_predict,
         "backtest": cmd_backtest,
+        "backtest-rules": cmd_backtest_rules,
         "verify": cmd_verify,
         "telegram-test": cmd_telegram_test,
         "daily": cmd_daily_run,

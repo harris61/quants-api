@@ -13,14 +13,10 @@ from database import init_db
 from collectors import (
     DailyDataCollector,
     HistoricalDataLoader,
-    BrokerSummaryCollector,
-    InsiderTradeCollector,
-    IntradayCollector,
-    MarketMoversCollector,
 )
-from models.predictor import Predictor
+from models.rule_based import RuleBasedPredictor
 from notifications import TelegramNotifier
-from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT, MOVERS_COLLECTION_ENABLED
+from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT, DAILY_COLLECT_DAYS
 
 # Setup logging
 logging.basicConfig(
@@ -76,7 +72,7 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     logger.info("\n[Step 1] Collecting today's market data...")
     try:
         collector = DailyDataCollector()
-        stats = collector.collect_today()
+        stats = collector.collect_and_save(days=DAILY_COLLECT_DAYS)
         results["data_collected"] = stats["success"] > 0
         results["data_stats"] = stats
         logger.info(f"Data collection: {stats['success']} stocks, {stats['records']} records")
@@ -84,60 +80,12 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
         logger.error(f"Data collection failed: {e}")
         results["errors"].append(f"Data collection: {e}")
 
-    # Step 1b: Collect broker summary data
-    logger.info("\n[Step 1b] Collecting broker summary data...")
-    try:
-        broker_collector = BrokerSummaryCollector()
-        broker_stats = broker_collector.collect_today()
-        results["broker_collected"] = broker_stats["success"] > 0
-        results["broker_stats"] = broker_stats
-        logger.info(f"Broker collection: {broker_stats['success']} stocks, {broker_stats['records']} records")
-    except Exception as e:
-        logger.error(f"Broker collection failed: {e}")
-        results["errors"].append(f"Broker collection: {e}")
-
-    # Step 1c: Collect intraday data
-    logger.info("\n[Step 1c] Collecting intraday data...")
-    try:
-        intraday_collector = IntradayCollector()
-        intraday_stats = intraday_collector.collect_today()
-        results["intraday_collected"] = intraday_stats["success"] > 0
-        results["intraday_stats"] = intraday_stats
-        logger.info(f"Intraday collection: {intraday_stats['success']} stocks, {intraday_stats['records']} records")
-    except Exception as e:
-        logger.error(f"Intraday collection failed: {e}")
-        results["errors"].append(f"Intraday collection: {e}")
-
-    # Step 1d: Collect insider data (weekly - Monday only)
-    if datetime.now().weekday() == 0:  # Monday
-        logger.info("\n[Step 1d] Collecting insider trading data (weekly)...")
-        try:
-            insider_collector = InsiderTradeCollector()
-            insider_stats = insider_collector.collect_and_save()
-            results["insider_collected"] = insider_stats["success"] > 0
-            results["insider_stats"] = insider_stats
-            logger.info(f"Insider collection: {insider_stats['success']} stocks, {insider_stats['new_records']} new records")
-        except Exception as e:
-            logger.error(f"Insider collection failed: {e}")
-            results["errors"].append(f"Insider collection: {e}")
-
-    # Step 1e: Collect market movers data
-    if MOVERS_COLLECTION_ENABLED:
-        logger.info("\n[Step 1e] Collecting market movers data...")
-        try:
-            movers_collector = MarketMoversCollector()
-            movers_stats = movers_collector.collect_and_save()
-            results["movers_collected"] = movers_stats["records"] > 0
-            results["movers_stats"] = movers_stats
-            logger.info(f"Movers collection: {movers_stats['records']} records")
-        except Exception as e:
-            logger.error(f"Movers collection failed: {e}")
-            results["errors"].append(f"Movers collection: {e}")
+    # Step 1b-1e: Skipped in rule-based mode (daily OHLCV only)
 
     # Step 2: Update yesterday's prediction results
     logger.info("\n[Step 2] Updating prediction results...")
     try:
-        predictor = Predictor()
+        predictor = RuleBasedPredictor()
         updated = predictor.update_actuals()
         results["actuals_updated"] = updated
         logger.info(f"Updated {updated} prediction results")
@@ -148,7 +96,7 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     # Step 3: Run predictions
     logger.info("\n[Step 3] Running predictions...")
     try:
-        predictor = Predictor()
+        predictor = RuleBasedPredictor()
         predictions = predictor.predict(top_k=TOP_PICKS_COUNT, save_to_db=True)
         results["predictions_made"] = not predictions.empty
         results["predictions"] = predictions.to_dict('records') if not predictions.empty else []
@@ -224,11 +172,9 @@ def run_initial_setup():
     1. Initialize database
     2. Collect stock list
     3. Load historical data
-    4. Train initial model
+    4. Warm-up complete (rule-based, no ML training)
     """
     from collectors import StockListCollector, HistoricalDataLoader
-    from features.pipeline import FeaturePipeline
-    from models.trainer import ModelTrainer
 
     logger.info("=" * 60)
     logger.info("INITIAL SETUP")
@@ -249,19 +195,8 @@ def run_initial_setup():
     loader = HistoricalDataLoader(days=365)
     loader.load_historical_data()
 
-    # Step 4: Train initial model
-    logger.info("\n[Step 4] Training initial model...")
-    pipeline = FeaturePipeline()
-    X, y = pipeline.build_training_dataset()
-
-    if not X.empty:
-        X_train, y_train, _ = pipeline.prepare_for_training(X, y)
-        trainer = ModelTrainer(model_name="initial_model")
-        trainer.train(X_train, y_train)
-        trainer.save()
-        logger.info("Model trained and saved!")
-    else:
-        logger.warning("Not enough data to train model!")
+    # Step 4: No model training in rule-based system
+    logger.info("\n[Step 4] Rule-based system ready (no ML training).")
 
     logger.info("\n" + "=" * 60)
     logger.info("Initial setup complete!")
