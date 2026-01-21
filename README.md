@@ -64,5 +64,5 @@ Edit `config.py`:
 
 Repository Notes
 ----------------
-- `database/quants.db` is not tracked in git; it is created locally.
+- `database/quants.db` is tracked with Git LFS. After cloning, run `git lfs pull`.
 - The analysis notebook is excluded from version control.
