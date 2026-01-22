@@ -136,7 +136,7 @@ RULE_DIST50_MIN = 0.0             # must be above MA50 (close > MA50)
 RULE_DIST50_MAX = 0.15            # not too extended above MA50 (max 15%)
 RULE_SLOPE_FLAT_MIN = -0.002      # MA50 slope must not be falling sharply
 
-# Momentum settings
+# Momentum settings (5-day return)
 RULE_MOMENTUM_PERIOD = 5          # 5-day return
 RULE_MOMENTUM_FLOOR = -0.05       # -5% momentum scores 0
 RULE_MOMENTUM_CEIL = 0.10         # +10% momentum scores 1

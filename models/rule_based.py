@@ -431,7 +431,14 @@ class RuleBasedPredictor:
 
         top_picks = results_df.head(top_k).copy()
 
-        print(f"\nTop {top_k} Ranked Picks:")
+        # Get prediction date from the data
+        pred_date = top_picks["date"].iloc[0] if not top_picks.empty else datetime.now().date()
+        if hasattr(pred_date, 'strftime'):
+            pred_date_str = pred_date.strftime("%Y-%m-%d")
+        else:
+            pred_date_str = str(pred_date)
+
+        print(f"\nTop {top_k} Ranked Picks (Data: {pred_date_str})")
         print("-" * 70)
         for _, row in top_picks.iterrows():
             print(f"  {row['rank']:2d}. {row['symbol']:6s} - Score: {row['probability']:.4f}  Mom: {row['momentum']:+.1%}  Vol: {row['volume_ratio']:.1f}x")
