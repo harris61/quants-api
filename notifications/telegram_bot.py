@@ -136,6 +136,10 @@ class TelegramNotifier:
 
             # Top performers
             if 'actual_return' in previous_results.columns:
+                previous_results = previous_results.copy()
+                previous_results['actual_return'] = pd.to_numeric(
+                    previous_results['actual_return'], errors='coerce'
+                )
                 top_return = previous_results.nlargest(3, 'actual_return')
                 if not top_return.empty:
                     message += "Top performers:\n"

@@ -28,7 +28,7 @@ class HistoricalDataLoader:
         """Get all active stock symbols from database"""
         with session_scope() as session:
             stocks = session.query(Stock).filter(Stock.is_active == True).all()
-            return [s.symbol for s in stocks]
+            return [s.symbol for s in stocks if self.collector._is_equity_symbol(s.symbol)]
 
     def get_last_data_date(self, symbol: str) -> Optional[datetime]:
         """Get the last date we have data for a stock"""

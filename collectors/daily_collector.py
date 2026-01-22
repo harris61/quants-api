@@ -12,7 +12,9 @@ from database import (
     session_scope, get_stock_by_symbol, Stock, DailyPrice,
     bulk_upsert_daily_prices
 )
-from config import DATASAHAM_API_KEY, API_RATE_LIMIT
+import re
+
+from config import DATASAHAM_API_KEY, API_RATE_LIMIT, EQUITY_SYMBOL_REGEX
 
 
 class DailyDataCollector:
@@ -20,6 +22,12 @@ class DailyDataCollector:
 
     def __init__(self, api_key: str = None):
         self.api = DatasahamAPI(api_key or DATASAHAM_API_KEY)
+        self._equity_pattern = re.compile(EQUITY_SYMBOL_REGEX)
+
+    def _is_equity_symbol(self, symbol: str) -> bool:
+        if not symbol:
+            return False
+        return bool(self._equity_pattern.match(symbol.upper()))
 
     def get_chart_data(self, symbol: str, from_date: str, to_date: str) -> List[Dict]:
         """
@@ -117,6 +125,8 @@ class DailyDataCollector:
         Returns:
             List of daily price records
         """
+        if not self._is_equity_symbol(symbol):
+            return []
         if from_date is None:
             from_date = datetime.now().strftime("%Y-%m-%d")
         if to_date is None:
@@ -152,7 +162,9 @@ class DailyDataCollector:
         if symbols is None:
             with session_scope() as session:
                 stocks = session.query(Stock).filter(Stock.is_active == True).all()
-                symbols = [s.symbol for s in stocks]
+                symbols = [s.symbol for s in stocks if self._is_equity_symbol(s.symbol)]
+        else:
+            symbols = [s for s in symbols if self._is_equity_symbol(s)]
 
         if not symbols:
             print("No symbols to collect data for!")
