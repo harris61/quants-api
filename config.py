@@ -41,11 +41,11 @@ DATABASE_PATH = DATABASE_DIR / "quants.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # ==================== MODEL SETTINGS ====================
-# Label threshold for top gainer (7% = 0.07)
-TOP_GAINER_THRESHOLD = 0.07
+# Label threshold for top gainer (5% = 0.05)
+TOP_GAINER_THRESHOLD = 0.05
 
 # Number of stocks to predict as top picks
-TOP_PICKS_COUNT = 10
+TOP_PICKS_COUNT = 5
 
 # Minimum data points required for training
 MIN_TRAINING_SAMPLES = 100
@@ -126,25 +126,33 @@ MAX_SECTOR_CONCENTRATION = 0.4  # Max 40% of picks from one sector
 MAX_SUBSECTOR_CONCENTRATION = 0.3  # Max 30% of picks from one subsector
 
 # ==================== RULE-BASED SETTINGS ====================
-# MA rule-based daily ranking (MA20/MA50)
-RULE_BASED_MODEL_NAME = "rule_ma20_ma50_v1"
-RULE_MA_FAST = 20
+# MA50-only rule-based daily ranking
+RULE_BASED_MODEL_NAME = "rule_ma50_v2"
 RULE_MA_SLOW = 50
-RULE_SLOPE_LOOKBACK = 5  # daily bars
+RULE_SLOPE_LOOKBACK = 5  # daily bars for slope calculation
 
-# Distance thresholds
-RULE_DIST20_ENTRY = 0.04
-RULE_DIST20_OVEREXTENDED = 0.08
-RULE_DIST50_FALLING_KNIFE = -0.03
+# Filter thresholds (MA50-based)
+RULE_DIST50_MIN = 0.0             # must be above MA50 (close > MA50)
+RULE_DIST50_MAX = 0.15            # not too extended above MA50 (max 15%)
+RULE_SLOPE_FLAT_MIN = -0.002      # MA50 slope must not be falling sharply
 
-# Slope thresholds (flat/naik)
-RULE_SLOPE_FLAT_MIN = -0.002
+# Momentum settings
+RULE_MOMENTUM_PERIOD = 5          # 5-day return
+RULE_MOMENTUM_FLOOR = -0.05       # -5% momentum scores 0
+RULE_MOMENTUM_CEIL = 0.10         # +10% momentum scores 1
+
+# Volume filter settings
+RULE_VOLUME_MA_PERIOD = 20
+RULE_VOLUME_RATIO_FLOOR = 0.5     # volume_ratio below this scores 0
+RULE_VOLUME_RATIO_CEIL = 1.5      # volume_ratio above this scores 1
+
+# Slope score mapping
 RULE_SLOPE_SCORE_FLOOR = -0.001
-RULE_SLOPE_SCORE_CEIL = 0.001
+RULE_SLOPE_SCORE_CEIL = 0.005     # increased ceiling for better spread
 
 # Ranking score weights (sum = 100)
-RULE_SCORE_WEIGHT_PROX = 40
-RULE_SCORE_WEIGHT_SLOPE = 25
-RULE_SCORE_WEIGHT_DIST50 = 25
-RULE_SCORE_WEIGHT_RECLAIM = 10
-RULE_SCORE_DIST50_CAP = 0.06
+RULE_SCORE_WEIGHT_MOMENTUM = 35   # recent price action
+RULE_SCORE_WEIGHT_SLOPE = 25      # MA50 trend direction
+RULE_SCORE_WEIGHT_DIST50 = 20     # position above MA50
+RULE_SCORE_WEIGHT_VOLUME = 20     # volume confirmation
+RULE_SCORE_DIST50_CAP = 0.10      # dist50 scoring cap

@@ -10,19 +10,23 @@ import pandas as pd
 
 from config import (
     RULE_BASED_MODEL_NAME,
-    RULE_MA_FAST,
     RULE_MA_SLOW,
     RULE_SLOPE_LOOKBACK,
-    RULE_DIST20_ENTRY,
-    RULE_DIST20_OVEREXTENDED,
-    RULE_DIST50_FALLING_KNIFE,
+    RULE_DIST50_MIN,
+    RULE_DIST50_MAX,
     RULE_SLOPE_FLAT_MIN,
+    RULE_MOMENTUM_PERIOD,
+    RULE_MOMENTUM_FLOOR,
+    RULE_MOMENTUM_CEIL,
+    RULE_VOLUME_MA_PERIOD,
+    RULE_VOLUME_RATIO_FLOOR,
+    RULE_VOLUME_RATIO_CEIL,
     RULE_SLOPE_SCORE_FLOOR,
     RULE_SLOPE_SCORE_CEIL,
-    RULE_SCORE_WEIGHT_PROX,
+    RULE_SCORE_WEIGHT_MOMENTUM,
     RULE_SCORE_WEIGHT_SLOPE,
     RULE_SCORE_WEIGHT_DIST50,
-    RULE_SCORE_WEIGHT_RECLAIM,
+    RULE_SCORE_WEIGHT_VOLUME,
     RULE_SCORE_DIST50_CAP,
     TOP_PICKS_COUNT,
     TOP_GAINER_THRESHOLD,
@@ -45,9 +49,29 @@ class RuleBasedPredictor:
         return max(min_value, min(value, max_value))
 
     def _is_equity_symbol(self, symbol: str) -> bool:
+        """Filter for normal Indonesian equities only (exclude ETFs, indices, reksadana)."""
         if not symbol:
             return False
-        return bool(self._equity_pattern.match(symbol.upper()))
+        symbol = symbol.upper()
+
+        # Must match 4-letter pattern
+        if not self._equity_pattern.match(symbol):
+            return False
+
+        # Exclude ETFs (start with X)
+        if symbol.startswith("X"):
+            return False
+
+        # Exclude known indices and non-equity instruments
+        excluded = {
+            "FTSE", "KLCI", "IHSG", "ISSI", "LQ45", "IDX3", "IDXG", "IDXV",
+            "IDXQ", "IDXE", "IDXS", "IDXH", "IDXI", "IDXC", "IDXF", "IDXB",
+            "PEFINDO25", "SRI-KEHATI",
+        }
+        if symbol in excluded:
+            return False
+
+        return True
 
     def _get_active_symbols(self) -> List[str]:
         with session_scope() as session:
@@ -110,41 +134,60 @@ class RuleBasedPredictor:
         result = {}
         for symbol, group in df_all.groupby("symbol"):
             stock_df = group.drop("symbol", axis=1).set_index("date").sort_index()
-            result[symbol] = stock_df
+            result[symbol] = self._precompute_indicators(stock_df)
 
         return result
 
+    def _precompute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Pre-compute MA50 and derived indicators for efficiency."""
+        df = df.copy()
+        df["ma50"] = df["close"].rolling(window=RULE_MA_SLOW).mean()
+        df["slope50"] = (df["ma50"] - df["ma50"].shift(RULE_SLOPE_LOOKBACK)) / df["ma50"].shift(RULE_SLOPE_LOOKBACK)
+        df["dist50"] = (df["close"] - df["ma50"]) / df["ma50"]
+        df["momentum"] = df["close"].pct_change(periods=RULE_MOMENTUM_PERIOD)
+        df["volume_ma"] = df["volume"].rolling(window=RULE_VOLUME_MA_PERIOD).mean()
+        df["volume_ratio"] = df["volume"] / df["volume_ma"]
+        return df
+
     def _score_candidate(
         self,
-        dist20: float,
-        dist50: float,
+        momentum: float,
         slope50: float,
-        reclaim_flag: int
+        dist50: float,
+        volume_ratio: float
     ) -> float:
-        prox_score = self._clamp(1 - (abs(dist20) / RULE_DIST20_ENTRY))
+        momentum_score = self._clamp(
+            (momentum - RULE_MOMENTUM_FLOOR) /
+            (RULE_MOMENTUM_CEIL - RULE_MOMENTUM_FLOOR)
+        )
         slope_score = self._clamp(
             (slope50 - RULE_SLOPE_SCORE_FLOOR) /
             (RULE_SLOPE_SCORE_CEIL - RULE_SLOPE_SCORE_FLOOR)
         )
         dist50_score = self._clamp(dist50 / RULE_SCORE_DIST50_CAP)
+        volume_score = self._clamp(
+            (volume_ratio - RULE_VOLUME_RATIO_FLOOR) /
+            (RULE_VOLUME_RATIO_CEIL - RULE_VOLUME_RATIO_FLOOR)
+        )
 
         total_weight = (
-            RULE_SCORE_WEIGHT_PROX
+            RULE_SCORE_WEIGHT_MOMENTUM
             + RULE_SCORE_WEIGHT_SLOPE
             + RULE_SCORE_WEIGHT_DIST50
-            + RULE_SCORE_WEIGHT_RECLAIM
+            + RULE_SCORE_WEIGHT_VOLUME
         )
         raw_score = (
-            prox_score * RULE_SCORE_WEIGHT_PROX
+            momentum_score * RULE_SCORE_WEIGHT_MOMENTUM
             + slope_score * RULE_SCORE_WEIGHT_SLOPE
             + dist50_score * RULE_SCORE_WEIGHT_DIST50
-            + reclaim_flag * RULE_SCORE_WEIGHT_RECLAIM
+            + volume_score * RULE_SCORE_WEIGHT_VOLUME
         )
 
         return raw_score / total_weight
 
     def _latest_signal(self, df: pd.DataFrame) -> Optional[dict]:
-        if df.empty or len(df) < (RULE_MA_SLOW + RULE_SLOPE_LOOKBACK + 2):
+        min_required = max(RULE_MA_SLOW, RULE_MOMENTUM_PERIOD, RULE_VOLUME_MA_PERIOD) + RULE_SLOPE_LOOKBACK + 2
+        if df.empty or len(df) < min_required:
             return None
 
         df = df.sort_index()
@@ -154,53 +197,45 @@ class RuleBasedPredictor:
         if idx < 1:
             return None
 
-        ma20 = df["close"].rolling(window=RULE_MA_FAST).mean()
-        ma50 = df["close"].rolling(window=RULE_MA_SLOW).mean()
-        slope50 = (ma50 - ma50.shift(RULE_SLOPE_LOOKBACK)) / ma50.shift(RULE_SLOPE_LOOKBACK)
+        # Use pre-computed indicators if available, otherwise compute on-the-fly
+        if "ma50" not in df.columns:
+            df = self._precompute_indicators(df)
 
         close = df["close"].iloc[idx]
-        low_prev = df["low"].iloc[idx - 1]
-        ma20_t = ma20.iloc[idx]
-        ma20_prev = ma20.iloc[idx - 1]
-        ma50_t = ma50.iloc[idx]
-        slope50_t = slope50.iloc[idx]
+        ma50_t = df["ma50"].iloc[idx]
+        slope50_t = df["slope50"].iloc[idx]
+        dist50 = df["dist50"].iloc[idx]
+        momentum = df["momentum"].iloc[idx]
+        volume_ratio = df["volume_ratio"].iloc[idx]
 
-        if any(pd.isna(x) for x in [ma20_t, ma20_prev, ma50_t, slope50_t]):
+        if any(pd.isna(x) for x in [ma50_t, slope50_t, dist50, momentum, volume_ratio]):
             return None
 
-        dist20 = (close - ma20_t) / ma20_t
-        dist50 = (close - ma50_t) / ma50_t
-
-        # Hard filters (trend + risk)
-        if close <= ma50_t:
+        # Hard filters (MA50-based only)
+        # 1. Must be above MA50
+        if dist50 < RULE_DIST50_MIN:
             return None
+        # 2. Not too extended above MA50
+        if dist50 > RULE_DIST50_MAX:
+            return None
+        # 3. MA50 slope must not be falling sharply
         if slope50_t < RULE_SLOPE_FLAT_MIN:
             return None
-        if dist20 > RULE_DIST20_OVEREXTENDED:
-            return None
-        if dist50 < RULE_DIST50_FALLING_KNIFE:
-            return None
-        if abs(dist20) > RULE_DIST20_ENTRY:
-            return None
 
-        # Trigger: pullback-reclaim OR close-in-zone
-        reclaim_flag = int((low_prev <= ma20_prev) and (close > ma20_t))
-        close_in_zone = int(close >= ma20_t)
-        if reclaim_flag == 0 and close_in_zone == 0:
-            return None
-
-        score = self._score_candidate(dist20, dist50, slope50_t, reclaim_flag)
+        score = self._score_candidate(momentum, slope50_t, dist50, volume_ratio)
 
         return {
             "score": score,
-            "dist20": dist20,
+            "momentum": momentum,
             "dist50": dist50,
             "slope50": slope50_t,
-            "reclaim": reclaim_flag,
-            "close_in_zone": close_in_zone,
+            "volume_ratio": volume_ratio,
         }
 
-    def backtest_last_days(self, days: int = 30, top_k: int = None) -> pd.DataFrame:
+    def backtest_last_days(self, days: int = 30, top_k: int = None, save_csv: bool = True) -> pd.DataFrame:
+        from utils.holidays import is_trading_day
+        from config import BASE_DIR
+
         top_k = top_k or TOP_PICKS_COUNT
 
         with session_scope() as session:
@@ -210,7 +245,9 @@ class RuleBasedPredictor:
             return pd.DataFrame()
 
         max_date = max_date[0]
-        buffer_days = RULE_MA_SLOW + RULE_SLOPE_LOOKBACK + days + 10
+        # Buffer needs to account for: MA50 warmup + slope lookback + test days + margin
+        # Multiply by 1.5 to convert trading days to calendar days (weekends/holidays)
+        buffer_days = int((RULE_MA_SLOW + RULE_SLOPE_LOOKBACK + days) * 1.5) + 20
         start_date = (max_date - timedelta(days=buffer_days)).strftime("%Y-%m-%d")
         end_date = max_date.strftime("%Y-%m-%d")
 
@@ -219,14 +256,16 @@ class RuleBasedPredictor:
 
         with session_scope() as session:
             date_rows = session.query(DailyPrice.date).distinct().order_by(DailyPrice.date).all()
-        all_dates = [r[0] for r in date_rows if r and r[0] is not None]
+        # Filter to trading days only (exclude weekends)
+        all_dates = [r[0] for r in date_rows if r and r[0] is not None and is_trading_day(r[0])]
         if len(all_dates) < days:
-            print("Not enough dates for backtest.")
+            print("Not enough trading dates for backtest.")
             return pd.DataFrame()
 
         eval_dates = all_dates[-days:]
 
         results = []
+        all_picks = []  # Collect all picks for CSV export
         total_preds = 0
         total_correct = 0
 
@@ -262,6 +301,12 @@ class RuleBasedPredictor:
                     "date": eval_date,
                     "symbol": symbol,
                     "score": signal["score"],
+                    "momentum": signal["momentum"],
+                    "dist50": signal["dist50"],
+                    "slope50": signal["slope50"],
+                    "volume_ratio": signal["volume_ratio"],
+                    "close": close_t,
+                    "close_next": close_next,
                     "return_next": ret_next,
                     "correct": int(ret_next >= TOP_GAINER_THRESHOLD),
                 })
@@ -275,9 +320,16 @@ class RuleBasedPredictor:
                 })
                 continue
 
-            picks_df = pd.DataFrame(picks).sort_values("score", ascending=False).head(top_k)
-            correct = int(picks_df["correct"].sum())
-            total = int(len(picks_df))
+            picks_df = pd.DataFrame(picks).sort_values("score", ascending=False)
+            # Add rank column before filtering to top_k
+            picks_df["rank"] = range(1, len(picks_df) + 1)
+            top_picks_df = picks_df.head(top_k).copy()
+
+            # Add to all_picks for CSV export
+            all_picks.extend(top_picks_df.to_dict("records"))
+
+            correct = int(top_picks_df["correct"].sum())
+            total = int(len(top_picks_df))
             precision = correct / total if total > 0 else 0.0
 
             total_preds += total
@@ -291,8 +343,33 @@ class RuleBasedPredictor:
             })
 
         summary_precision = total_correct / total_preds if total_preds > 0 else 0.0
-        print(f"\nBacktest (last {days} days) Precision@{top_k}: {summary_precision:.2%} ({total_correct}/{total_preds})")
-        return pd.DataFrame(results)
+        print(f"\nBacktest ({len(eval_dates)} trading days) Precision@{top_k}: {summary_precision:.2%} ({total_correct}/{total_preds})")
+
+        # Build full results DataFrame with stockpick columns
+        picks_df = pd.DataFrame(all_picks) if all_picks else pd.DataFrame()
+        summary_df = pd.DataFrame(results)
+
+        # Add stockpick columns to summary
+        for i in range(1, top_k + 1):
+            summary_df[f"stockpick_{i}"] = ""
+
+        for idx, row in summary_df.iterrows():
+            eval_date = row["date"]
+            if not picks_df.empty:
+                date_picks = picks_df[picks_df["date"] == eval_date].sort_values("rank")
+                for _, pick in date_picks.iterrows():
+                    rank = int(pick["rank"])
+                    ret_pct = pick["return_next"] * 100
+                    summary_df.at[idx, f"stockpick_{rank}"] = f"{pick['symbol']}/{ret_pct:+.1f}%"
+
+        # Save to CSV
+        if save_csv:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = BASE_DIR / f"backtest_{timestamp}.csv"
+            summary_df.to_csv(csv_path, index=False)
+            print(f"Backtest results saved to: {csv_path}")
+
+        return summary_df
 
     def predict(
         self,
@@ -325,10 +402,10 @@ class RuleBasedPredictor:
                 "probability": signal["score"],
                 "score": signal["score"] * 100,
                 "date": df.index[-1],
-                "dist20": signal["dist20"],
+                "momentum": signal["momentum"],
                 "dist50": signal["dist50"],
                 "slope50": signal["slope50"],
-                "reclaim": signal["reclaim"],
+                "volume_ratio": signal["volume_ratio"],
             })
 
         if not results:
@@ -355,9 +432,9 @@ class RuleBasedPredictor:
         top_picks = results_df.head(top_k).copy()
 
         print(f"\nTop {top_k} Ranked Picks:")
-        print("-" * 50)
+        print("-" * 70)
         for _, row in top_picks.iterrows():
-            print(f"  {row['rank']:2d}. {row['symbol']:6s} - Score: {row['probability']:.4f}")
+            print(f"  {row['rank']:2d}. {row['symbol']:6s} - Score: {row['probability']:.4f}  Mom: {row['momentum']:+.1%}  Vol: {row['volume_ratio']:.1f}x")
 
         return top_picks
 

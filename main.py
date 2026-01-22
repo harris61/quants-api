@@ -93,7 +93,8 @@ def cmd_backtest_rules(args):
     init_db()
 
     predictor = RuleBasedPredictor()
-    results = predictor.backtest_last_days(days=args.days, top_k=args.top)
+    save_csv = not getattr(args, 'no_csv', False)
+    results = predictor.backtest_last_days(days=args.days, top_k=args.top, save_csv=save_csv)
 
     if not results.empty:
         print("\n" + "=" * 50)
@@ -254,6 +255,7 @@ Examples:
     rb_backtest_parser = subparsers.add_parser("backtest-rules", help="Run rule-based backtest")
     rb_backtest_parser.add_argument("--days", type=int, default=30, help="Number of recent days to test")
     rb_backtest_parser.add_argument("--top", type=int, default=10, help="Top K picks per day")
+    rb_backtest_parser.add_argument("--no-csv", action="store_true", help="Don't save CSV files")
 
     # Verify command
     verify_parser = subparsers.add_parser("verify", help="Verify data and rule-based system")
