@@ -55,7 +55,7 @@ volume_score   = clamp((volume_ratio - 0.5) / (1.5 - 0.5))       # 0.5x→0, 1.5
 
 ### Daily Output
 
-The strategy outputs the **top 5 stocks** ranked by score, with:
+The strategy outputs the **top 5 stocks** ranked by score (max 5), with:
 - Symbol
 - Score (0-1)
 - 5-day momentum (%)
@@ -275,8 +275,8 @@ python main.py predict --top 5 --telegram
 # Last 30 trading days
 python main.py backtest-rules --days 30 --top 5
 
-# Last 60 trading days with top 10
-python main.py backtest-rules --days 60 --top 10
+# Last 60 trading days with top 5
+python main.py backtest-rules --days 60 --top 5
 ```
 
 ### Full Daily Workflow

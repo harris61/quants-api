@@ -232,11 +232,12 @@ class RuleBasedPredictor:
             "volume_ratio": volume_ratio,
         }
 
-    def backtest_last_days(self, days: int = 30, top_k: int = None, save_csv: bool = True) -> pd.DataFrame:
+    def backtest_last_days(self, days: int = 30, top_k: int = None, save_csv: bool = False) -> pd.DataFrame:
         from utils.holidays import is_trading_day
         from config import BASE_DIR
 
         top_k = top_k or TOP_PICKS_COUNT
+        top_k = min(top_k, TOP_PICKS_COUNT)
 
         with session_scope() as session:
             max_date = session.query(DailyPrice.date).order_by(DailyPrice.date.desc()).first()
@@ -378,6 +379,7 @@ class RuleBasedPredictor:
         save_to_db: bool = True
     ) -> pd.DataFrame:
         top_k = top_k or TOP_PICKS_COUNT
+        top_k = min(top_k, TOP_PICKS_COUNT)
         symbols = symbols or self._get_active_symbols()
 
         if not symbols:

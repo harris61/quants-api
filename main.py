@@ -69,8 +69,9 @@ def cmd_predict(args):
     init_db()
 
     predictor = RuleBasedPredictor()
+    top_k = min(args.top, 5)
     results = predictor.predict(
-        top_k=args.top,
+        top_k=top_k,
         save_to_db=not args.no_save
     )
 
@@ -93,8 +94,11 @@ def cmd_backtest_rules(args):
     init_db()
 
     predictor = RuleBasedPredictor()
-    save_csv = not getattr(args, 'no_csv', False)
-    results = predictor.backtest_last_days(days=args.days, top_k=args.top, save_csv=save_csv)
+    save_csv = bool(getattr(args, 'csv', False))
+    if getattr(args, 'no_csv', False):
+        save_csv = False
+    top_k = min(args.top, 5)
+    results = predictor.backtest_last_days(days=args.days, top_k=top_k, save_csv=save_csv)
 
     if not results.empty:
         print("\n" + "=" * 50)
@@ -237,7 +241,7 @@ Examples:
 
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Run daily ranked picks")
-    predict_parser.add_argument("--top", type=int, default=10, help="Number of top picks")
+    predict_parser.add_argument("--top", type=int, default=5, help="Number of top picks (max 5)")
     predict_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     predict_parser.add_argument("--telegram", action="store_true", help="Send via Telegram")
 
@@ -254,8 +258,9 @@ Examples:
     # Rule-based backtest command
     rb_backtest_parser = subparsers.add_parser("backtest-rules", help="Run rule-based backtest")
     rb_backtest_parser.add_argument("--days", type=int, default=30, help="Number of recent days to test")
-    rb_backtest_parser.add_argument("--top", type=int, default=10, help="Top K picks per day")
-    rb_backtest_parser.add_argument("--no-csv", action="store_true", help="Don't save CSV files")
+    rb_backtest_parser.add_argument("--top", type=int, default=5, help="Top K picks per day (max 5)")
+    rb_backtest_parser.add_argument("--csv", action="store_true", help="Save CSV files")
+    rb_backtest_parser.add_argument("--no-csv", action="store_true", help="Don't save CSV files (deprecated)")
 
     # Verify command
     verify_parser = subparsers.add_parser("verify", help="Verify data and rule-based system")

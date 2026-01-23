@@ -8,7 +8,7 @@ Overview
 - Data sources: Datasaham API (daily OHLCV, broker summary, insider, intraday, movers)
 - Storage: SQLite (`database/quants.db`)
 - Strategy: MA20/MA50 rule-based filter + ranking
-- Output: top 10 ranked candidates after market close
+- Output: top 5 ranked candidates after market close
 
 Quick Start
 -----------
@@ -23,7 +23,7 @@ Quick Start
 5) (Optional) Backfill movers from existing daily data:
    - `python main.py collect-movers --backfill --start 2025-01-20 --end 2026-01-20 --top 50`
 6) Generate ranked picks:
-   - `python main.py predict --top 10`
+   - `python main.py predict --top 5`
 
 Daily Workflow
 --------------
