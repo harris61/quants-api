@@ -53,7 +53,7 @@ DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 TOP_GAINER_THRESHOLD = 0.05
 
 # Number of stocks to predict as top picks
-TOP_PICKS_COUNT = 5
+TOP_PICKS_COUNT = 3
 
 # ==================== DATA COLLECTION ====================
 # Historical data to collect (in days)
