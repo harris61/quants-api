@@ -67,6 +67,7 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
 
     # Initialize database
     init_db()
+    collector = None
 
     # Step 1: Collect today's data
     logger.info("\n[Step 1] Collecting today's market data...")
@@ -83,6 +84,8 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     # Step 1b: Collect foreign flow data
     logger.info("\n[Step 1b] Collecting foreign flow data...")
     try:
+        if collector is None:
+            collector = DailyDataCollector()
         foreign_stats = collector.collect_foreign_flow()
         results["foreign_flow_stats"] = foreign_stats
         logger.info(f"Foreign flow: {foreign_stats['updated']} stocks updated")

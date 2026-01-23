@@ -8,8 +8,9 @@ Overview
 - **Strategy**: MA50 trend filter + momentum + foreign flow scoring
 - **Data sources**: Datasaham API (daily OHLCV, foreign flow, movers)
 - **Storage**: SQLite (`database/quants.db`)
-- **Output**: Top 5 ranked stock picks after market close
+- **Output**: Top 5 ranked stock picks after market close (symbol, name, score)
 - **Performance**: 27.50% precision (2.7x better than random)
+ - **Adjustments**: Stock splits and cash dividends are back-adjusted when corporate actions exist
 
 Quick Start
 -----------
@@ -91,6 +92,7 @@ python main.py load-historical --days 365  # Load historical data
 # Predictions
 python main.py predict --top 5         # Generate top 5 picks
 python main.py predict --telegram      # With Telegram notification
+python main.py predict-scores --top 5  # Include component scores
 
 # Backtesting
 python main.py backtest-rules --days 30    # 30-day backtest
@@ -98,6 +100,7 @@ python main.py backtest-rules --days 60    # 60-day backtest
 
 # Utilities
 python main.py verify                  # Verify data and system
+python main.py verify-range --start 2025-01-20 --end 2026-01-23  # Verify data coverage
 python main.py telegram-test           # Test Telegram notification
 python main.py daily                   # Full daily workflow
 ```

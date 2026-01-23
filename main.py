@@ -75,6 +75,27 @@ def cmd_predict(args):
         notifier.send_predictions(results)
 
 
+def cmd_predict_scores(args):
+    """Run predictions with component scores for review"""
+    from models.rule_based import RuleBasedPredictor
+
+    init_db()
+
+    predictor = RuleBasedPredictor()
+    top_k = min(args.top, 5)
+    results = predictor.predict(
+        top_k=top_k,
+        save_to_db=False,
+        include_components=True
+    )
+
+    if not results.empty:
+        print("\n" + "=" * 50)
+        print("PREDICTION COMPONENT SCORES")
+        print("=" * 50)
+        print(results.to_string(index=False))
+
+
 def cmd_backtest_rules(args):
     """Run rule-based backtest"""
     from models.rule_based import RuleBasedPredictor
@@ -122,6 +143,35 @@ def cmd_verify(args):
         print(f"  Strategy: {predictor.model_name}")
     except Exception as e:
         print(f"  Rule-based system error: {e}")
+
+
+def cmd_verify_range(args):
+    """Verify data coverage for a date range"""
+    from database import session_scope, DailyPrice
+
+    start_date = args.start
+    end_date = args.end
+
+    with session_scope() as session:
+        query = session.query(DailyPrice)
+        if start_date:
+            query = query.filter(DailyPrice.date >= start_date)
+        if end_date:
+            query = query.filter(DailyPrice.date <= end_date)
+
+        total_records = query.count()
+        distinct_stocks = query.with_entities(DailyPrice.stock_id).distinct().count()
+
+        min_date = query.with_entities(DailyPrice.date).order_by(DailyPrice.date.asc()).first()
+        max_date = query.with_entities(DailyPrice.date).order_by(DailyPrice.date.desc()).first()
+
+    print("RANGE VERIFICATION")
+    print(f"  start: {start_date or 'N/A'}")
+    print(f"  end: {end_date or 'N/A'}")
+    print(f"  total_records: {total_records}")
+    print(f"  distinct_stocks: {distinct_stocks}")
+    print(f"  min_date: {min_date[0] if min_date else None}")
+    print(f"  max_date: {max_date[0] if max_date else None}")
 
 
 def cmd_telegram_test(args):
@@ -249,6 +299,10 @@ Examples:
     predict_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     predict_parser.add_argument("--telegram", action="store_true", help="Send via Telegram")
 
+    # Predict with component scores
+    predict_scores_parser = subparsers.add_parser("predict-scores", help="Run predictions with component scores")
+    predict_scores_parser.add_argument("--top", type=int, default=5, help="Number of top picks (max 5)")
+
     # Backtest command
     rb_backtest_parser = subparsers.add_parser("backtest-rules", help="Run rule-based backtest")
     rb_backtest_parser.add_argument("--days", type=int, default=30, help="Number of recent days to test")
@@ -258,6 +312,11 @@ Examples:
 
     # Verify command
     verify_parser = subparsers.add_parser("verify", help="Verify data and rule-based system")
+
+    # Verify date range command
+    verify_range_parser = subparsers.add_parser("verify-range", help="Verify data coverage for a date range")
+    verify_range_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    verify_range_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
 
     # Telegram test command
     telegram_parser = subparsers.add_parser("telegram-test", help="Test Telegram notification")
@@ -308,8 +367,10 @@ Examples:
         "collect-foreign": cmd_collect_foreign,
         "load-historical": cmd_load_historical,
         "predict": cmd_predict,
+        "predict-scores": cmd_predict_scores,
         "backtest-rules": cmd_backtest_rules,
         "verify": cmd_verify,
+        "verify-range": cmd_verify_range,
         "telegram-test": cmd_telegram_test,
         "daily": cmd_daily_run,
     }

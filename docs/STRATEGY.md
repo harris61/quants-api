@@ -52,9 +52,16 @@ Stocks passing the filters are scored (0-1 scale) using five components:
 
 **Score Formula:**
 ```
-score = (momentum_score × 32 + slope_score × 23 + dist50_score × 18
-         + volume_score × 17 + foreign_score × 10) / 100
+foreign_weight = 10 if foreign_net is available else 0
+score = (
+    momentum_score * 32
+    + slope_score * 23
+    + dist50_score * 18
+    + volume_score * 17
+    + foreign_score * foreign_weight
+) / (32 + 23 + 18 + 17 + foreign_weight)
 ```
+
 
 Each component is clamped to [0, 1]:
 ```python
@@ -65,16 +72,24 @@ volume_score   = clamp((volume_ratio - 0.5) / (1.5 - 0.5))       # 0.5x→0, 1.5
 foreign_score  = clamp((foreign_net - (-1B)) / (10B - (-1B)))    # -1B→0, +10B→1
 ```
 
-**Note:** When foreign flow data is unavailable for a stock, it receives a neutral score (0.5).
+**Note:** When foreign flow data is unavailable for a stock, its foreign weight is set to 0 (no contribution).
 
 ### Daily Output
 
 The strategy outputs the **top 5 stocks** ranked by score (max 5), with:
-- Symbol
+- Symbol and name
 - Score (0-1)
 - 5-day momentum (%)
 - Volume ratio (x avg)
 - Foreign net flow (if available)
+
+### Corporate Actions Adjustments
+
+If corporate actions are present in the database, the system applies backward adjustments:
+- **Stock splits**: Prices before ex-date are divided by split ratio; volumes are multiplied.
+- **Cash dividends**: Prices before ex-date are reduced by the cash dividend amount (floored).
+
+These adjustments are applied before indicators are computed to avoid artificial gaps.
 
 ---
 
@@ -228,20 +243,28 @@ def _score_candidate(self, momentum, slope50, dist50, volume_ratio, foreign_net=
     dist50_score = self._clamp(...)
     volume_score = self._clamp(...)
 
-    # Foreign flow score (neutral 0.5 if no data)
+    # Foreign flow score (weight 0 if no data)
     if foreign_net is not None and not pd.isna(foreign_net):
         foreign_score = self._clamp(
             (foreign_net - RULE_FOREIGN_FLOOR) / (RULE_FOREIGN_CEIL - RULE_FOREIGN_FLOOR)
         )
     else:
-        foreign_score = 0.5
+        foreign_score = 0.0
 
+    foreign_weight = RULE_SCORE_WEIGHT_FOREIGN if foreign_net is not None and not pd.isna(foreign_net) else 0
     raw_score = (
         momentum_score * RULE_SCORE_WEIGHT_MOMENTUM
         + slope_score * RULE_SCORE_WEIGHT_SLOPE
         + dist50_score * RULE_SCORE_WEIGHT_DIST50
         + volume_score * RULE_SCORE_WEIGHT_VOLUME
-        + foreign_score * RULE_SCORE_WEIGHT_FOREIGN
+        + foreign_score * foreign_weight
+    )
+    total_weight = (
+        RULE_SCORE_WEIGHT_MOMENTUM
+        + RULE_SCORE_WEIGHT_SLOPE
+        + RULE_SCORE_WEIGHT_DIST50
+        + RULE_SCORE_WEIGHT_VOLUME
+        + foreign_weight
     )
     return raw_score / total_weight
 ```
@@ -255,6 +278,9 @@ def _score_candidate(self, momentum, slope50, dist50, volume_ratio, foreign_net=
 ```bash
 # Generate today's top 5 picks
 python main.py predict --top 5
+
+# Generate picks with component scores
+python main.py predict-scores --top 5
 
 # With Telegram notification
 python main.py predict --top 5 --telegram
@@ -275,6 +301,13 @@ python main.py backtest-rules --days 60 --top 5
 ```bash
 # Collect data + foreign flow + predict + notify
 python main.py daily
+```
+
+### Data Coverage Verification
+
+```bash
+# Verify data coverage for a date range
+python main.py verify-range --start 2025-01-20 --end 2026-01-23
 ```
 
 ---
@@ -301,7 +334,7 @@ The strategy is approximately **2.7x better** than random selection at identifyi
 
 ## Limitations & Notes
 
-1. **Foreign Flow Coverage**: Only ~1% of records have foreign flow data. Stocks without data receive neutral score.
+1. **Foreign Flow Coverage**: Only ~1% of records have foreign flow data. Stocks without data get zero foreign weight.
 
 2. **No Stop-Loss**: Strategy only handles entry ranking, not exit/risk management.
 

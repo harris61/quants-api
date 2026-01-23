@@ -69,6 +69,13 @@ API_RATE_LIMIT = 0.5
 # Only include normal equity tickers (IDX equities are 4 uppercase letters)
 EQUITY_SYMBOL_REGEX = r"^[A-Z]{4}$"
 
+# ==================== HOLIDAYS ====================
+# Populate with IDX holidays in YYYY-MM-DD format.
+IDX_HOLIDAYS = [
+    # "2025-12-25",
+    # "2026-01-01",
+]
+
 # ==================== NOTIFICATIONS ====================
 
 # ==================== LOGGING ====================

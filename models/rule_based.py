@@ -44,7 +44,7 @@ from config import (
     MOVERS_FILTER_TYPES,
     EQUITY_SYMBOL_REGEX,
 )
-from database import session_scope, Stock, DailyPrice, Prediction
+from database import session_scope, Stock, DailyPrice, Prediction, CorporateAction
 
 
 class RuleBasedPredictor:
@@ -62,7 +62,7 @@ class RuleBasedPredictor:
         - Slope (23%): MA50 trend direction
         - Dist50 (18%): Position above MA50
         - Volume (17%): Volume vs 20-day average
-        - Foreign (10%): Net foreign flow (neutral 0.5 if no data)
+        - Foreign (10%): Net foreign flow (weight is 0 if no data)
     """
 
     def __init__(self) -> None:
@@ -113,6 +113,8 @@ class RuleBasedPredictor:
         if not symbols:
             return {}
 
+        actions_map = self._load_corporate_actions(symbols, start_date=start_date, end_date=end_date)
+
         with session_scope() as session:
             query = session.query(
                 Stock.symbol,
@@ -159,6 +161,8 @@ class RuleBasedPredictor:
         result = {}
         for symbol, group in df_all.groupby("symbol"):
             stock_df = group.drop("symbol", axis=1).set_index("date").sort_index()
+            if symbol in actions_map:
+                stock_df = self._apply_corporate_actions(stock_df, actions_map[symbol])
             result[symbol] = self._precompute_indicators(stock_df)
 
         return result
@@ -174,6 +178,96 @@ class RuleBasedPredictor:
         df["volume_ratio"] = df["volume"] / df["volume_ma"]
         return df
 
+    def _load_corporate_actions(
+        self,
+        symbols: List[str],
+        start_date: str = None,
+        end_date: str = None
+    ) -> dict:
+        if not symbols:
+            return {}
+
+        def _to_date(value):
+            if value is None or not isinstance(value, str):
+                return value
+            try:
+                return datetime.strptime(value, "%Y-%m-%d").date()
+            except ValueError:
+                return value
+
+        start_date = _to_date(start_date)
+        end_date = _to_date(end_date)
+
+        with session_scope() as session:
+            query = session.query(CorporateAction).filter(
+                CorporateAction.symbol.in_([s.upper() for s in symbols]),
+                CorporateAction.action_type.in_(["stocksplit", "dividend"]),
+                CorporateAction.ex_date != None,
+                CorporateAction.value != None,
+            )
+            if start_date:
+                query = query.filter(CorporateAction.ex_date >= start_date)
+            if end_date:
+                query = query.filter(CorporateAction.ex_date <= end_date)
+
+            actions = query.all()
+
+        actions_map = {}
+        for action in actions:
+            symbol = action.symbol
+            actions_map.setdefault(symbol, []).append(action)
+
+        return actions_map
+
+    def _apply_corporate_actions(self, df: pd.DataFrame, actions: list) -> pd.DataFrame:
+        """Apply backward adjustments for stock splits and cash dividends."""
+        if df.empty or not actions:
+            return df
+
+        df = df.copy()
+        price_cols = ["open", "high", "low", "close"]
+
+        for action in sorted(actions, key=lambda x: x.ex_date or datetime.min.date()):
+            ex_date = pd.Timestamp(action.ex_date)
+            if ex_date not in df.index and not (df.index < ex_date).any():
+                continue
+
+            action_type = (action.action_type or "").lower()
+            if action_type == "stocksplit":
+                ratio = action.value
+                if ratio is None:
+                    continue
+                try:
+                    ratio = float(ratio)
+                except (TypeError, ValueError):
+                    continue
+                if ratio <= 0 or ratio == 1:
+                    continue
+                mask = df.index < ex_date
+                if not mask.any():
+                    continue
+                df.loc[mask, price_cols] = df.loc[mask, price_cols] / ratio
+                df.loc[mask, "volume"] = df.loc[mask, "volume"] * ratio
+                continue
+
+            if action_type == "dividend":
+                cash_div = action.value
+                if cash_div is None:
+                    continue
+                try:
+                    cash_div = float(cash_div)
+                except (TypeError, ValueError):
+                    continue
+                if cash_div <= 0:
+                    continue
+                mask = df.index < ex_date
+                if not mask.any():
+                    continue
+                # Approximate cash dividend back-adjustment; floor to avoid negatives.
+                df.loc[mask, price_cols] = (df.loc[mask, price_cols] - cash_div).clip(lower=0.01)
+
+        return df
+
     def _score_candidate(
         self,
         momentum: float,
@@ -182,6 +276,18 @@ class RuleBasedPredictor:
         volume_ratio: float,
         foreign_net: float = None
     ) -> float:
+        return self._score_components(
+            momentum, slope50, dist50, volume_ratio, foreign_net
+        )["score"]
+
+    def _score_components(
+        self,
+        momentum: float,
+        slope50: float,
+        dist50: float,
+        volume_ratio: float,
+        foreign_net: float = None
+    ) -> dict:
         momentum_score = self._clamp(
             (momentum - RULE_MOMENTUM_FLOOR) /
             (RULE_MOMENTUM_CEIL - RULE_MOMENTUM_FLOOR)
@@ -204,8 +310,8 @@ class RuleBasedPredictor:
             )
             foreign_weight = RULE_SCORE_WEIGHT_FOREIGN
         else:
-            foreign_score = 0.5  # Neutral score when no data
-            foreign_weight = RULE_SCORE_WEIGHT_FOREIGN
+            foreign_score = 0.0
+            foreign_weight = 0
 
         total_weight = (
             RULE_SCORE_WEIGHT_MOMENTUM
@@ -222,7 +328,14 @@ class RuleBasedPredictor:
             + foreign_score * foreign_weight
         )
 
-        return raw_score / total_weight
+        return {
+            "score": raw_score / total_weight,
+            "momentum_score": momentum_score,
+            "slope_score": slope_score,
+            "dist50_score": dist50_score,
+            "volume_score": volume_score,
+            "foreign_score": foreign_score,
+        }
 
     def _latest_signal(self, df: pd.DataFrame) -> Optional[dict]:
         min_required = max(RULE_MA_SLOW, RULE_MOMENTUM_PERIOD, RULE_VOLUME_MA_PERIOD) + RULE_SLOPE_LOOKBACK + 2
@@ -245,10 +358,13 @@ class RuleBasedPredictor:
         slope50_t = df["slope50"].iloc[idx]
         dist50 = df["dist50"].iloc[idx]
         momentum = df["momentum"].iloc[idx]
+        volume_ma_t = df["volume_ma"].iloc[idx]
         volume_ratio = df["volume_ratio"].iloc[idx]
         foreign_net = df["foreign_net"].iloc[idx] if "foreign_net" in df.columns else None
 
-        if any(pd.isna(x) for x in [ma50_t, slope50_t, dist50, momentum, volume_ratio]):
+        if any(pd.isna(x) for x in [ma50_t, slope50_t, dist50, momentum, volume_ma_t, volume_ratio]):
+            return None
+        if close <= 0 or volume_ma_t <= 0:
             return None
 
         # Hard filters (MA50-based only)
@@ -262,7 +378,8 @@ class RuleBasedPredictor:
         if slope50_t < RULE_SLOPE_FLAT_MIN:
             return None
 
-        score = self._score_candidate(momentum, slope50_t, dist50, volume_ratio, foreign_net)
+        components = self._score_components(momentum, slope50_t, dist50, volume_ratio, foreign_net)
+        score = components["score"]
 
         return {
             "score": score,
@@ -271,6 +388,11 @@ class RuleBasedPredictor:
             "slope50": slope50_t,
             "volume_ratio": volume_ratio,
             "foreign_net": foreign_net,
+            "momentum_score": components["momentum_score"],
+            "slope_score": components["slope_score"],
+            "dist50_score": components["dist50_score"],
+            "volume_score": components["volume_score"],
+            "foreign_score": components["foreign_score"],
         }
 
     def backtest_last_days(self, days: int = 30, top_k: int = None, save_csv: bool = False) -> pd.DataFrame:
@@ -417,7 +539,8 @@ class RuleBasedPredictor:
         self,
         symbols: List[str] = None,
         top_k: int = None,
-        save_to_db: bool = True
+        save_to_db: bool = True,
+        include_components: bool = False
     ) -> pd.DataFrame:
         top_k = top_k or TOP_PICKS_COUNT
         top_k = min(top_k, TOP_PICKS_COUNT)
@@ -440,7 +563,7 @@ class RuleBasedPredictor:
             if signal is None:
                 continue
 
-            results.append({
+            row = {
                 "symbol": symbol,
                 "probability": signal["score"],
                 "score": signal["score"] * 100,
@@ -449,7 +572,17 @@ class RuleBasedPredictor:
                 "dist50": signal["dist50"],
                 "slope50": signal["slope50"],
                 "volume_ratio": signal["volume_ratio"],
-            })
+            }
+            if include_components:
+                row.update({
+                    "momentum_score": signal.get("momentum_score"),
+                    "slope_score": signal.get("slope_score"),
+                    "dist50_score": signal.get("dist50_score"),
+                    "volume_score": signal.get("volume_score"),
+                    "foreign_score": signal.get("foreign_score"),
+                })
+
+            results.append(row)
 
         if not results:
             print("No candidates found.")
@@ -483,8 +616,16 @@ class RuleBasedPredictor:
 
         print(f"\nTop {top_k} Ranked Picks (Data: {pred_date_str})")
         print("-" * 70)
+        name_map = {}
+        with session_scope() as session:
+            rows = session.query(Stock.symbol, Stock.name).filter(
+                Stock.symbol.in_(top_picks["symbol"].tolist())
+            ).all()
+        name_map = {symbol: name or "" for symbol, name in rows}
         for _, row in top_picks.iterrows():
-            print(f"  {row['rank']:2d}. {row['symbol']:6s} - Score: {row['probability']:.4f}  Mom: {row['momentum']:+.1%}  Vol: {row['volume_ratio']:.1f}x")
+            name = name_map.get(row["symbol"], "")
+            label = f"{row['symbol']:6s} {name}" if name else f"{row['symbol']:6s}"
+            print(f"  {row['rank']:2d}. {label} - Score: {row['probability']:.4f}")
 
         return top_picks
 
