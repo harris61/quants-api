@@ -8,8 +8,8 @@ Overview
 - **Strategy**: MA50 trend filter + momentum + foreign flow scoring
 - **Data sources**: Datasaham API (daily OHLCV, foreign flow, movers)
 - **Storage**: SQLite (`database/quants.db`)
-- **Output**: Top 5 ranked stock picks after market close (symbol, name, score)
-- **Performance**: 27.50% precision (2.7x better than random)
+- **Output**: Top 3 ranked stock picks after market close (symbol, name, score)
+- **Performance**: 31.94% precision (3.1x better than random)
  - **Adjustments**: Stock splits and cash dividends are back-adjusted when corporate actions exist
 
 Quick Start
@@ -41,7 +41,7 @@ Quick Start
 
 6. Generate ranked picks:
    ```bash
-   python main.py predict --top 5
+   python main.py predict --top 3
    ```
 
 Daily Workflow
@@ -90,9 +90,9 @@ python main.py collect-movers          # Collect movers lists
 python main.py load-historical --days 365  # Load historical data
 
 # Predictions
-python main.py predict --top 5         # Generate top 5 picks
+python main.py predict --top 3         # Generate top 3 picks
 python main.py predict --telegram      # With Telegram notification
-python main.py predict-scores --top 5  # Include component scores
+python main.py predict-scores --top 3  # Include component scores
 
 # Backtesting
 python main.py backtest-rules --days 30    # 30-day backtest
@@ -108,7 +108,7 @@ python main.py daily                   # Full daily workflow
 Configuration
 -------------
 Edit `config.py`:
-- `TOP_PICKS_COUNT`: Number of stocks to pick (default: 5)
+- `TOP_PICKS_COUNT`: Number of stocks to pick (default: 3)
 - `TOP_GAINER_THRESHOLD`: Target return threshold (default: 5%)
 - `MOVERS_FILTER_ENABLED`: Enable movers filter (default: True)
 - `RULE_SCORE_WEIGHT_*`: Scoring component weights
@@ -120,9 +120,9 @@ Based on 30-day backtest (Dec 2025 - Jan 2026):
 
 | Metric | Value |
 |--------|-------|
-| Precision@5 | 27.50% |
+| Precision@3 | 31.94% |
 | Random baseline | 10.2% |
-| Edge | +17.3% (2.7x) |
+| Edge | +21.7% (3.1x) |
 
 Repository Notes
 ----------------

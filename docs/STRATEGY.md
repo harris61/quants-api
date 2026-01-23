@@ -76,7 +76,7 @@ foreign_score  = clamp((foreign_net - (-1B)) / (10B - (-1B)))    # -1B→0, +10B
 
 ### Daily Output
 
-The strategy outputs the **top 5 stocks** ranked by score (max 5), with:
+The strategy outputs the **top 3 stocks** ranked by score, with:
 - Symbol and name
 - Score (0-1)
 - 5-day momentum (%)
@@ -100,7 +100,7 @@ All parameters are in `config.py`:
 ```python
 # ==================== STRATEGY SETTINGS ====================
 TOP_GAINER_THRESHOLD = 0.05          # 5% target for "correct" prediction
-TOP_PICKS_COUNT = 5                  # Top N stocks per day
+TOP_PICKS_COUNT = 3                  # Top N stocks per day
 
 # ==================== MOVERS FILTER ====================
 MOVERS_FILTER_ENABLED = True         # Filter to active stocks only
@@ -276,24 +276,24 @@ def _score_candidate(self, momentum, slope50, dist50, volume_ratio, foreign_net=
 ### Daily Prediction
 
 ```bash
-# Generate today's top 5 picks
-python main.py predict --top 5
+# Generate today's top 3 picks
+python main.py predict --top 3
 
 # Generate picks with component scores
-python main.py predict-scores --top 5
+python main.py predict-scores --top 3
 
 # With Telegram notification
-python main.py predict --top 5 --telegram
+python main.py predict --top 3 --telegram
 ```
 
 ### Backtesting
 
 ```bash
 # Last 30 trading days
-python main.py backtest-rules --days 30 --top 5
+python main.py backtest-rules --days 30 --top 3
 
 # Last 60 trading days
-python main.py backtest-rules --days 60 --top 5
+python main.py backtest-rules --days 60 --top 3
 ```
 
 ### Full Daily Workflow
@@ -316,19 +316,20 @@ python main.py verify-range --start 2025-01-20 --end 2026-01-23
 
 Based on backtest (30 trading days, Dec 2025 - Jan 2026):
 
-| Configuration | Precision@5 |
-|--------------|-------------|
+| Configuration | Precision |
+|--------------|-----------|
 | Baseline (no filters) | 21.5% |
 | + Movers filter | 25.83% |
-| + Foreign flow (10%) | **27.50%** |
+| + Foreign flow (10%) | 27.50% |
+| + TOP_PICKS=3 | **31.94%** |
 
 | Metric | Value |
 |--------|-------|
-| **Current Precision@5** | **27.50%** |
+| **Current Precision@3** | **31.94%** |
 | Baseline (random) | 10.2% |
-| Edge vs Baseline | **+17.3%** |
+| Edge vs Baseline | **+21.7%** |
 
-The strategy is approximately **2.7x better** than random selection at identifying stocks that gain ≥5% the next day.
+The strategy is approximately **3.1x better** than random selection at identifying stocks that gain ≥5% the next day.
 
 ---
 
@@ -350,8 +351,8 @@ The strategy is approximately **2.7x better** than random selection at identifyi
 
 - [x] ~~Add market regime filter (movers-based)~~ ✅ Implemented
 - [x] ~~Add foreign flow signal~~ ✅ Implemented
+- [x] ~~Optimize TOP_PICKS_COUNT~~ ✅ Reduced to 3 for higher precision
 - [ ] Add IDX holiday calendar
 - [ ] Implement T+2 settlement cooldown in backtest
 - [ ] Add sector diversification filter
 - [ ] Add stop-loss tracking with intraday data
-- [ ] Test alternative momentum periods (3-day, 10-day)

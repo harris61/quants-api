@@ -6,7 +6,8 @@ Strategy: MA50 + Momentum + Foreign Flow
 - Movers filter: Only trade stocks in top value/volume/frequency lists
 - Hard filters: Above MA50, not overextended (15%), slope not falling
 - Scoring: Momentum (32%) + Slope (23%) + Dist50 (18%) + Volume (17%) + Foreign (10%)
-- Performance: 27.50% precision (2.7x better than random)
+- Output: Top 3 ranked picks daily
+- Performance: 31.94% precision (3.1x better than random)
 
 See docs/STRATEGY.md for full documentation.
 """
