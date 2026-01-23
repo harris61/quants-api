@@ -56,12 +56,6 @@ def cmd_load_historical(args):
         loader.load_historical_data(resume=not args.no_resume)
 
 
-def cmd_train(args):
-    """Training disabled in rule-based system"""
-    print("Training is disabled in the rule-based system.")
-    print("Use `python main.py predict` to generate daily ranked picks.")
-
-
 def cmd_predict(args):
     """Run predictions"""
     from models.rule_based import RuleBasedPredictor
@@ -79,12 +73,6 @@ def cmd_predict(args):
         from notifications import TelegramNotifier
         notifier = TelegramNotifier()
         notifier.send_predictions(results)
-
-
-def cmd_backtest(args):
-    """Backtest disabled in rule-based system"""
-    print("Backtest is disabled in the rule-based system.")
-    print("We can add rule-based backtesting in a future step.")
 
 
 def cmd_backtest_rules(args):
@@ -197,6 +185,31 @@ def cmd_collect_movers(args):
         collector.collect_and_save()
 
 
+def cmd_collect_foreign(args):
+    """Collect foreign flow data from movers endpoints"""
+    from collectors import DailyDataCollector
+    from datetime import datetime, timedelta
+
+    init_db()
+    collector = DailyDataCollector()
+
+    if args.backfill:
+        # Backfill historical data
+        if not args.start or not args.end:
+            # Default to last 30 days
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        else:
+            start_date = args.start
+            end_date = args.end
+        print(f"Backfilling foreign flow from {start_date} to {end_date}")
+        print("WARNING: This is slow (~0.5s per stock). Press Ctrl+C to cancel.")
+        collector.backfill_foreign_flow(start_date=start_date, end_date=end_date)
+    else:
+        # Collect today's data from movers
+        collector.collect_foreign_flow(date=args.date)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quants-API - Indonesian Stock Market Rule-Based Ranking System",
@@ -206,9 +219,8 @@ Examples:
   python main.py init                      # Initialize database
   python main.py collect-stocks            # Collect stock list
   python main.py load-historical --days 365  # Load 1 year of data
-  python main.py train                     # (disabled) ML training
   python main.py predict                   # Run daily ranked picks
-  python main.py backtest                  # (disabled) ML backtest
+  python main.py backtest-rules --days 30  # Run backtest
   python main.py daily                     # Run daily workflow
         """
     )
@@ -231,14 +243,6 @@ Examples:
     historical_parser.add_argument("--no-resume", action="store_true", help="Don't resume from last date")
     historical_parser.add_argument("--verify", action="store_true", help="Only verify existing data")
 
-    # Train command
-    train_parser = subparsers.add_parser("train", help="(disabled) Train ML model")
-    train_parser.add_argument("--start", type=str, help="Training start date")
-    train_parser.add_argument("--end", type=str, help="Training end date")
-    train_parser.add_argument("--name", type=str, help="Model name")
-    train_parser.add_argument("--no-smote", action="store_true", help="Disable SMOTE")
-    train_parser.add_argument("--ranking", action="store_true", help="Train a LambdaRank model")
-
     # Predict command
     predict_parser = subparsers.add_parser("predict", help="Run daily ranked picks")
     predict_parser.add_argument("--top", type=int, default=5, help="Number of top picks (max 5)")
@@ -246,16 +250,6 @@ Examples:
     predict_parser.add_argument("--telegram", action="store_true", help="Send via Telegram")
 
     # Backtest command
-    backtest_parser = subparsers.add_parser("backtest", help="(disabled) Run walk-forward backtest")
-    backtest_parser.add_argument("--start", type=str, help="Backtest start date")
-    backtest_parser.add_argument("--end", type=str, help="Backtest end date")
-    backtest_parser.add_argument("--train-days", type=int, default=180, help="Training window days")
-    backtest_parser.add_argument("--test-days", type=int, default=30, help="Test window days")
-    backtest_parser.add_argument("--top-k", type=int, default=10, help="Top K predictions")
-    backtest_parser.add_argument("--save", action="store_true", help="Save results to CSV")
-    backtest_parser.add_argument("--ranking", action="store_true", help="Use ranking model during backtest")
-
-    # Rule-based backtest command
     rb_backtest_parser = subparsers.add_parser("backtest-rules", help="Run rule-based backtest")
     rb_backtest_parser.add_argument("--days", type=int, default=30, help="Number of recent days to test")
     rb_backtest_parser.add_argument("--top", type=int, default=5, help="Top K picks per day (max 5)")
@@ -289,6 +283,13 @@ Examples:
     movers_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
     movers_parser.add_argument("--top", type=int, default=50, help="Top N per mover type")
 
+    # Collect foreign flow data command
+    foreign_parser = subparsers.add_parser("collect-foreign", help="Collect foreign flow data")
+    foreign_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD), defaults to today")
+    foreign_parser.add_argument("--backfill", action="store_true", help="Backfill historical data (slow)")
+    foreign_parser.add_argument("--start", type=str, help="Start date for backfill (YYYY-MM-DD)")
+    foreign_parser.add_argument("--end", type=str, help="End date for backfill (YYYY-MM-DD)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -304,10 +305,9 @@ Examples:
         "collect-insider": cmd_collect_insider,
         "collect-intraday": cmd_collect_intraday,
         "collect-movers": cmd_collect_movers,
+        "collect-foreign": cmd_collect_foreign,
         "load-historical": cmd_load_historical,
-        "train": cmd_train,
         "predict": cmd_predict,
-        "backtest": cmd_backtest,
         "backtest-rules": cmd_backtest_rules,
         "verify": cmd_verify,
         "telegram-test": cmd_telegram_test,

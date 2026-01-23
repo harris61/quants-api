@@ -80,7 +80,15 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
         logger.error(f"Data collection failed: {e}")
         results["errors"].append(f"Data collection: {e}")
 
-    # Step 1b-1e: Skipped in rule-based mode (daily OHLCV only)
+    # Step 1b: Collect foreign flow data
+    logger.info("\n[Step 1b] Collecting foreign flow data...")
+    try:
+        foreign_stats = collector.collect_foreign_flow()
+        results["foreign_flow_stats"] = foreign_stats
+        logger.info(f"Foreign flow: {foreign_stats['updated']} stocks updated")
+    except Exception as e:
+        logger.error(f"Foreign flow collection failed: {e}")
+        results["errors"].append(f"Foreign flow: {e}")
 
     # Step 2: Update yesterday's prediction results
     logger.info("\n[Step 2] Updating prediction results...")

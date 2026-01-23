@@ -210,6 +210,189 @@ class DailyDataCollector:
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         return self.collect_and_save(from_date=today, to_date=yesterday)
 
+    def collect_foreign_flow(self, date: str = None) -> Dict[str, int]:
+        """
+        Collect foreign flow data from movers endpoints and update daily_prices.
+
+        The chart_daily API doesn't return foreign data, but the net_foreign_buy
+        and net_foreign_sell endpoints do. This method fetches those lists and
+        updates the corresponding daily_prices records.
+
+        Args:
+            date: Date to update (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            Dict with collection statistics
+        """
+        from database import session_scope, get_stock_by_symbol, DailyPrice
+
+        stats = {"updated": 0, "not_found": 0}
+
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        # Fetch foreign buy list
+        foreign_buy_list = self.get_net_foreign_buy()
+        # Fetch foreign sell list
+        foreign_sell_list = self.get_net_foreign_sell()
+
+        # Combine into a dict by symbol
+        foreign_data = {}
+
+        for item in foreign_buy_list:
+            symbol = item.get("stock_detail", {}).get("code")
+            if not symbol or not self._is_equity_symbol(symbol):
+                continue
+            foreign_buy = item.get("net_foreign_buy", {}).get("raw", 0) or 0
+            foreign_sell = item.get("net_foreign_sell", {}).get("raw", 0) or 0
+            foreign_data[symbol] = {
+                "foreign_buy": foreign_buy,
+                "foreign_sell": foreign_sell,
+                "foreign_net": foreign_buy - foreign_sell
+            }
+
+        for item in foreign_sell_list:
+            symbol = item.get("stock_detail", {}).get("code")
+            if not symbol or not self._is_equity_symbol(symbol):
+                continue
+            if symbol not in foreign_data:
+                foreign_buy = item.get("net_foreign_buy", {}).get("raw", 0) or 0
+                foreign_sell = item.get("net_foreign_sell", {}).get("raw", 0) or 0
+                foreign_data[symbol] = {
+                    "foreign_buy": foreign_buy,
+                    "foreign_sell": foreign_sell,
+                    "foreign_net": foreign_buy - foreign_sell
+                }
+
+        # Update daily_prices records
+        with session_scope() as session:
+            for symbol, data in foreign_data.items():
+                stock = get_stock_by_symbol(session, symbol)
+                if not stock:
+                    stats["not_found"] += 1
+                    continue
+
+                # Find the daily_price record for this stock and date
+                price_record = session.query(DailyPrice).filter(
+                    DailyPrice.stock_id == stock.id,
+                    DailyPrice.date == date
+                ).first()
+
+                if price_record:
+                    price_record.foreign_buy = data["foreign_buy"]
+                    price_record.foreign_sell = data["foreign_sell"]
+                    price_record.foreign_net = data["foreign_net"]
+                    stats["updated"] += 1
+                else:
+                    stats["not_found"] += 1
+
+        print(f"Foreign flow collection: {stats['updated']} updated, {stats['not_found']} not found")
+        return stats
+
+    def backfill_foreign_flow(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: List[str] = None,
+        show_progress: bool = True
+    ) -> Dict[str, int]:
+        """
+        Backfill historical foreign flow data using broker_summary API.
+
+        This is slow because it requires one API call per stock.
+        Use for historical backfill only.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD) - older date
+            end_date: End date (YYYY-MM-DD) - more recent date
+            symbols: List of symbols to backfill. If None, uses all active stocks.
+            show_progress: Show progress bar
+
+        Returns:
+            Dict with backfill statistics
+        """
+        from database import session_scope, get_stock_by_symbol, Stock, DailyPrice
+
+        stats = {"stocks_processed": 0, "records_updated": 0, "errors": 0}
+
+        # Get symbols from database if not provided
+        if symbols is None:
+            with session_scope() as session:
+                stocks = session.query(Stock).filter(Stock.is_active == True).all()
+                symbols = [s.symbol for s in stocks if self._is_equity_symbol(s.symbol)]
+
+        print(f"Backfilling foreign flow for {len(symbols)} stocks from {start_date} to {end_date}")
+        print("This may take a while...")
+
+        iterator = tqdm(symbols, desc="Backfilling foreign flow") if show_progress else symbols
+
+        for symbol in iterator:
+            try:
+                # Get broker summary with foreign investor filter
+                result = self.api._request(f"market-detector/broker-summary/{symbol}", {
+                    "from": start_date,
+                    "to": end_date,
+                    "transactionType": "TRANSACTION_TYPE_NET",
+                    "investorType": "INVESTOR_TYPE_FOREIGN",
+                    "limit": 100
+                })
+
+                # Extract daily foreign flow from broker data
+                broker_data = result.get("data", {}).get("broker_summary", {})
+                brokers_buy = broker_data.get("brokers_buy", [])
+                brokers_sell = broker_data.get("brokers_sell", [])
+
+                # Group by date
+                daily_foreign = {}
+                for broker in brokers_buy:
+                    date_str = broker.get("netbs_date", "")
+                    if not date_str:
+                        continue
+                    # Convert YYYYMMDD to YYYY-MM-DD
+                    date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                    if date not in daily_foreign:
+                        daily_foreign[date] = {"buy": 0, "sell": 0}
+                    daily_foreign[date]["buy"] += float(broker.get("bval", 0) or 0)
+
+                for broker in brokers_sell:
+                    date_str = broker.get("netbs_date", "")
+                    if not date_str:
+                        continue
+                    date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                    if date not in daily_foreign:
+                        daily_foreign[date] = {"buy": 0, "sell": 0}
+                    daily_foreign[date]["sell"] += float(broker.get("sval", 0) or 0)
+
+                # Update daily_prices records
+                with session_scope() as session:
+                    stock = get_stock_by_symbol(session, symbol)
+                    if not stock:
+                        continue
+
+                    for date, data in daily_foreign.items():
+                        price_record = session.query(DailyPrice).filter(
+                            DailyPrice.stock_id == stock.id,
+                            DailyPrice.date == date
+                        ).first()
+
+                        if price_record:
+                            price_record.foreign_buy = data["buy"]
+                            price_record.foreign_sell = data["sell"]
+                            price_record.foreign_net = data["buy"] - data["sell"]
+                            stats["records_updated"] += 1
+
+                stats["stocks_processed"] += 1
+                time.sleep(API_RATE_LIMIT)
+
+            except Exception as e:
+                if show_progress:
+                    tqdm.write(f"Error for {symbol}: {e}")
+                stats["errors"] += 1
+                continue
+
+        print(f"\nBackfill complete: {stats['stocks_processed']} stocks, {stats['records_updated']} records updated, {stats['errors']} errors")
+        return stats
+
 
 def collect_daily():
     """CLI function to collect daily data"""
