@@ -6,7 +6,6 @@ from collectors.historical_loader import HistoricalDataLoader
 from collectors.broker_collector import BrokerSummaryCollector
 from collectors.insider_collector import InsiderTradeCollector
 from collectors.intraday_collector import IntradayCollector
-from collectors.mover_collector import MarketMoversCollector
 
 __all__ = [
     "StockListCollector",
@@ -15,5 +14,4 @@ __all__ = [
     "BrokerSummaryCollector",
     "InsiderTradeCollector",
     "IntradayCollector",
-    "MarketMoversCollector",
 ]

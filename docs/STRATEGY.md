@@ -13,16 +13,7 @@
 
 ### Core Concept
 
-The strategy combines **trend-following** (MA50) with **momentum** and **foreign flow** to rank stocks daily. It filters for stocks in uptrends, applies a movers filter for active stocks, and scores them by momentum, trend strength, volume confirmation, and foreign investor activity.
-
-### Pre-Filter: Movers Filter
-
-Before scoring, stocks must appear in daily movers lists:
-- `top_value` - Highest trading value
-- `top_volume` - Highest trading volume
-- `top_frequency` - Most transactions
-
-This ensures we only trade actively traded stocks. Controlled by `MOVERS_FILTER_ENABLED = True`.
+The strategy combines **trend-following** (MA50) with **momentum** and **foreign flow** to rank stocks daily. It filters for stocks in uptrends and scores them by momentum, trend strength, volume confirmation, and foreign investor activity.
 
 ### Entry Criteria (Hard Filters)
 
@@ -102,10 +93,6 @@ All parameters are in `config.py`:
 TOP_GAINER_THRESHOLD = 0.05          # 5% target for "correct" prediction
 TOP_PICKS_COUNT = 3                  # Top N stocks per day
 
-# ==================== MOVERS FILTER ====================
-MOVERS_FILTER_ENABLED = True         # Filter to active stocks only
-MOVERS_FILTER_TYPES = ["top_value", "top_volume", "top_frequency"]
-
 # ==================== RULE-BASED SETTINGS ====================
 RULE_BASED_MODEL_NAME = "rule_ma50_v2"
 RULE_MA_SLOW = 50                    # MA period
@@ -153,13 +140,12 @@ RULE_SCORE_DIST50_CAP = 0.10         # Dist50 scoring cap
 |--------|---------|---------|
 | Daily OHLCV | `collect-data` | Price, volume, value |
 | Foreign Flow | `collect-foreign` | Net foreign buy/sell |
-| Movers | `collect-movers` | Top value/volume/frequency lists |
 | Broker Summary | `collect-broker` | Broker activity (optional) |
 | Insider Trades | `collect-insider` | Insider activity (optional) |
 
 ### Foreign Flow Collection
 
-Foreign flow data is collected from the movers API endpoints:
+Foreign flow data is collected from the net foreign API endpoints:
 - `net_foreign_buy` - Top 50 stocks with highest foreign buying
 - `net_foreign_sell` - Top 50 stocks with highest foreign selling
 
@@ -169,6 +155,10 @@ python main.py collect-foreign
 
 # Backfill historical (slow, ~0.5s per stock)
 python main.py collect-foreign --backfill --start 2025-12-01 --end 2026-01-23
+
+# Fill missing days (per-day calls)
+python main.py collect-foreign --fill-missing --start 2025-01-01 --end 2025-12-31
+# Resume progress stored in cache/foreign_backfill_state.json
 ```
 
 ---
@@ -319,7 +309,6 @@ Based on backtest (30 trading days, Dec 2025 - Jan 2026):
 | Configuration | Precision |
 |--------------|-----------|
 | Baseline (no filters) | 21.5% |
-| + Movers filter | 25.83% |
 | + Foreign flow (10%) | 27.50% |
 | + TOP_PICKS=3 | **31.94%** |
 
@@ -349,7 +338,6 @@ The strategy is approximately **3.1x better** than random selection at identifyi
 
 ## Future Improvements
 
-- [x] ~~Add market regime filter (movers-based)~~ ✅ Implemented
 - [x] ~~Add foreign flow signal~~ ✅ Implemented
 - [x] ~~Optimize TOP_PICKS_COUNT~~ ✅ Reduced to 3 for higher precision
 - [ ] Add IDX holiday calendar

@@ -93,27 +93,7 @@ class DatasahamAPI:
             "to": to_date
         })
 
-    # ==================== MOVERS ====================
-
-    def top_gainer(self) -> Dict[str, Any]:
-        """Saham dengan kenaikan harga tertinggi"""
-        return self._request("movers/top-gainer")
-
-    def top_loser(self) -> Dict[str, Any]:
-        """Saham dengan penurunan harga terbesar"""
-        return self._request("movers/top-loser")
-
-    def top_value(self) -> Dict[str, Any]:
-        """Saham dengan nilai transaksi tertinggi"""
-        return self._request("movers/top-value")
-
-    def top_volume(self) -> Dict[str, Any]:
-        """Saham dengan volume transaksi tertinggi"""
-        return self._request("movers/top-volume")
-
-    def top_frequency(self) -> Dict[str, Any]:
-        """Saham dengan frekuensi transaksi tertinggi"""
-        return self._request("movers/top-frequency")
+    # ==================== NET FOREIGN ====================
 
     def net_foreign_buy(self) -> Dict[str, Any]:
         """Saham dengan net foreign buy tertinggi"""
@@ -255,17 +235,6 @@ class DatasahamAPI:
             "profile": self.emiten_profile(symbol)
         }
 
-    def get_market_overview(self) -> Dict[str, Any]:
-        """
-        Helper: Ringkasan pasar hari ini
-        """
-        return {
-            "trending": self.trending(),
-            "top_gainer": self.top_gainer(),
-            "top_loser": self.top_loser(),
-            "top_value": self.top_value()
-        }
-
 
 # Contoh penggunaan
 if __name__ == "__main__":
@@ -301,42 +270,26 @@ if __name__ == "__main__":
     for stock in trending_list[:5]:
         print(f"    - {stock['symbol']}: {stock['name']} ({stock['change']} | {stock['percent']}%)")
 
-    # 3. Top gainers
-    print("\n[3] Top gainers...")
-    gainers = api.top_gainer()
-    for stock in gainers.get("data", {}).get("mover_list", [])[:5]:
-        detail = stock["stock_detail"]
-        change = stock["change"]
-        print(f"    - {detail['code']}: {detail['name']} (+{change['percentage']:.2f}%)")
-
-    # 4. Top losers
-    print("\n[4] Top losers...")
-    losers = api.top_loser()
-    for stock in losers.get("data", {}).get("mover_list", [])[:5]:
-        detail = stock["stock_detail"]
-        change = stock["change"]
-        print(f"    - {detail['code']}: {detail['name']} ({change['percentage']:.2f}%)")
-
-    # 5. Chart data
-    print("\n[5] Data harian BBCA (5 hari terakhir)...")
+    # 3. Chart data
+    print("\n[3] Data harian BBCA (5 hari terakhir)...")
     chart = api.chart_daily("BBCA", "2026-01-19", "2026-01-01")
     for candle in chart.get("data", {}).get("chartbit", [])[:5]:
         print(f"    - {candle['date']}: O={candle['open']} H={candle['high']} L={candle['low']} C={candle['close']} V={candle['volume']}")
 
-    # 6. Dividend calendar
-    print("\n[6] Jadwal dividen mendatang...")
+    # 4. Dividend calendar
+    print("\n[4] Jadwal dividen mendatang...")
     dividends = api.calendar_dividend()
     for div in dividends.get("data", {}).get("dividend", [])[:5]:
         print(f"    - {div['company_symbol']}: {div['dividend_value_formatted']} (Ex-date: {div['dividend_exdate']})")
 
-    # 7. Sectors
-    print("\n[7] Daftar sektor...")
+    # 5. Sectors
+    print("\n[5] Daftar sektor...")
     sectors = api.sectors()
     for sector in sectors.get("data", [])[:10]:
         print(f"    - {sector['id']}: {sector['name']}")
 
-    # 8. Company profile
-    print("\n[8] Profil BBCA...")
+    # 6. Company profile
+    print("\n[6] Profil BBCA...")
     profile = api.emiten_profile("BBCA")
     print(f"    Background: {profile.get('background', '')[:200]}...")
 

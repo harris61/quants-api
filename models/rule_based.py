@@ -3,7 +3,6 @@ Rule-Based Predictor - MA50 + Momentum + Foreign Flow daily ranking (long-only)
 
 Strategy Components:
 - MA50 trend filter (must be above MA50, not overextended, slope not falling)
-- Movers filter (only trade stocks in top value/volume/frequency lists)
 - 5-component scoring: momentum (32%), slope (23%), dist50 (18%), volume (17%), foreign (10%)
 
 Performance: 27.50% precision (2.7x better than random)
@@ -40,8 +39,6 @@ from config import (
     RULE_SCORE_DIST50_CAP,
     TOP_PICKS_COUNT,
     TOP_GAINER_THRESHOLD,
-    MOVERS_FILTER_ENABLED,
-    MOVERS_FILTER_TYPES,
     EQUITY_SYMBOL_REGEX,
 )
 from database import session_scope, Stock, DailyPrice, Prediction, CorporateAction
@@ -52,7 +49,6 @@ class RuleBasedPredictor:
     Generate daily ranked picks using MA50 + Momentum + Foreign Flow strategy.
 
     Filters:
-        - Movers filter: Only stocks in top value/volume/frequency lists
         - Above MA50: close > MA50
         - Not overextended: dist50 < 15%
         - Slope not falling: MA50 slope > -0.2%
@@ -451,7 +447,6 @@ class RuleBasedPredictor:
                 signal = self._signal_for_index(df, idx)
                 if signal is None:
                     continue
-
                 if idx + 1 >= len(df):
                     continue
 
@@ -592,16 +587,6 @@ class RuleBasedPredictor:
         results_df = results_df.sort_values("probability", ascending=False)
         results_df["rank"] = range(1, len(results_df) + 1)
 
-        # Optional movers-based filter
-        if MOVERS_FILTER_ENABLED:
-            mover_date = results_df["date"].iloc[0] if not results_df.empty else None
-            if mover_date is not None:
-                mover_symbols = self._get_mover_symbols(mover_date, MOVERS_FILTER_TYPES)
-                if mover_symbols:
-                    results_df = results_df[results_df["symbol"].isin(mover_symbols)].copy()
-                    results_df = results_df.sort_values("probability", ascending=False)
-                    results_df["rank"] = range(1, len(results_df) + 1)
-
         if save_to_db:
             self._save_predictions(results_df)
 
@@ -628,17 +613,6 @@ class RuleBasedPredictor:
             print(f"  {row['rank']:2d}. {label} - Score: {row['probability']:.4f}")
 
         return top_picks
-
-    def _get_mover_symbols(self, date, mover_types: List[str]) -> List[str]:
-        from database import DailyMover
-
-        with session_scope() as session:
-            rows = session.query(Stock.symbol).join(DailyMover, DailyMover.stock_id == Stock.id).filter(
-                DailyMover.date == date,
-                DailyMover.mover_type.in_(mover_types)
-            ).all()
-
-        return [r[0] for r in rows]
 
     def _save_predictions(self, results: pd.DataFrame) -> None:
         from utils.holidays import next_trading_day

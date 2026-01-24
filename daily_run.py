@@ -9,7 +9,8 @@ import schedule
 import time as time_module
 from typing import Optional
 
-from database import init_db
+from database import init_db, session_scope
+from database.models import DailyPrice, Stock
 from collectors import (
     DailyDataCollector,
     HistoricalDataLoader,
@@ -34,6 +35,18 @@ def is_trading_day() -> bool:
     """Check if today is a trading day on IDX (excludes weekends and holidays)"""
     from utils.holidays import is_trading_day as check_trading_day
     return check_trading_day(datetime.now().date())
+
+
+def _get_latest_price_snapshot() -> tuple:
+    """Return latest daily_prices date, record count, and active stock count."""
+    with session_scope() as session:
+        latest_row = session.query(DailyPrice.date).order_by(DailyPrice.date.desc()).first()
+        if not latest_row:
+            return None, 0, 0
+        latest_date = latest_row[0]
+        records = session.query(DailyPrice).filter(DailyPrice.date == latest_date).count()
+        active = session.query(Stock).filter(Stock.is_active == True).count()
+    return latest_date, records, active
 
 
 def run_daily_workflow(send_telegram: bool = True) -> dict:
@@ -65,6 +78,11 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     logger.info(f"Starting daily workflow - {results['date']}")
     logger.info("=" * 60)
 
+    if not is_trading_day():
+        results["status"] = "skipped_non_trading_day"
+        logger.info("Not a trading day. Skipping workflow.")
+        return results
+
     # Initialize database
     init_db()
     collector = None
@@ -93,6 +111,28 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
         logger.error(f"Foreign flow collection failed: {e}")
         results["errors"].append(f"Foreign flow: {e}")
 
+    # Sanity check: ensure latest daily data matches today
+    data_ready = results["data_collected"]
+    try:
+        latest_date, record_count, active_count = _get_latest_price_snapshot()
+        results["latest_data_date"] = str(latest_date) if latest_date else None
+        results["latest_data_records"] = record_count
+        results["active_stock_count"] = active_count
+        if latest_date != datetime.now().date():
+            data_ready = False
+            msg = f"Latest daily_prices date is {latest_date}, expected {datetime.now().date()}"
+            logger.error(msg)
+            results["errors"].append(f"Data freshness: {msg}")
+        if record_count == 0:
+            data_ready = False
+            msg = "No daily_prices records found for latest date"
+            logger.error(msg)
+            results["errors"].append(f"Data coverage: {msg}")
+    except Exception as e:
+        data_ready = False
+        logger.error(f"Data readiness check failed: {e}")
+        results["errors"].append(f"Data readiness: {e}")
+
     # Step 2: Update yesterday's prediction results
     logger.info("\n[Step 2] Updating prediction results...")
     try:
@@ -106,16 +146,22 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
 
     # Step 3: Run predictions
     logger.info("\n[Step 3] Running predictions...")
-    try:
-        predictor = RuleBasedPredictor()
-        predictions = predictor.predict(top_k=TOP_PICKS_COUNT, save_to_db=True)
-        results["predictions_made"] = not predictions.empty
-        results["predictions"] = predictions.to_dict('records') if not predictions.empty else []
-        logger.info(f"Generated {len(predictions)} predictions")
-    except Exception as e:
-        logger.error(f"Prediction failed: {e}")
-        results["errors"].append(f"Prediction: {e}")
+    if not data_ready:
+        logger.error("Skipping predictions due to stale or missing daily data.")
+        results["predictions_made"] = False
+        results["errors"].append("Prediction skipped: data not ready")
         predictions = None
+    else:
+        try:
+            predictor = RuleBasedPredictor()
+            predictions = predictor.predict(top_k=TOP_PICKS_COUNT, save_to_db=True)
+            results["predictions_made"] = not predictions.empty
+            results["predictions"] = predictions.to_dict('records') if not predictions.empty else []
+            logger.info(f"Generated {len(predictions)} predictions")
+        except Exception as e:
+            logger.error(f"Prediction failed: {e}")
+            results["errors"].append(f"Prediction: {e}")
+            predictions = None
 
     # Step 4: Send Telegram notification
     if send_telegram and predictions is not None and not predictions.empty:

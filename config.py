@@ -3,7 +3,6 @@ Configuration settings for Quants-API
 Indonesian Stock Market Rule-Based Ranking System
 
 Strategy: MA50 + Momentum + Foreign Flow
-- Movers filter: Only trade stocks in top value/volume/frequency lists
 - Hard filters: Above MA50, not overextended (15%), slope not falling
 - Scoring: Momentum (32%) + Slope (23%) + Dist50 (18%) + Volume (17%) + Foreign (10%)
 - Output: Top 3 ranked picks daily
@@ -64,7 +63,7 @@ HISTORICAL_DAYS = 365  # 1 year
 DAILY_COLLECT_DAYS = 30
 
 # Rate limiting for API calls (seconds between calls)
-API_RATE_LIMIT = 0.5
+API_RATE_LIMIT = 0.2
 
 # ==================== SYMBOL FILTER ====================
 # Only include normal equity tickers (IDX equities are 4 uppercase letters)
@@ -95,13 +94,6 @@ INSIDER_COLLECTION_DAY = 0  # Monday (0=Mon, 6=Sun)
 INTRADAY_COLLECTION_ENABLED = True
 INTRADAY_INTERVAL = "1h"  # Hourly candles
 INTRADAY_DAYS = 5  # Days of intraday data to keep
-
-# Movers collection
-MOVERS_COLLECTION_ENABLED = True
-
-# Movers-based trading filter (regime filter)
-MOVERS_FILTER_ENABLED = True
-MOVERS_FILTER_TYPES = ["top_value", "top_volume", "top_frequency"]
 
 # ==================== RULE-BASED SETTINGS ====================
 # MA50-only rule-based daily ranking

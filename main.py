@@ -223,27 +223,23 @@ def cmd_collect_intraday(args):
     collector.collect_and_save(days=args.days)
 
 
-def cmd_collect_movers(args):
-    """Collect daily mover lists"""
-    from collectors import MarketMoversCollector
-
-    init_db()
-    collector = MarketMoversCollector()
-    if args.backfill:
-        collector.backfill_from_db(start_date=args.start, end_date=args.end, top_n=args.top)
-    else:
-        collector.collect_and_save()
-
-
 def cmd_collect_foreign(args):
-    """Collect foreign flow data from movers endpoints"""
+    """Collect foreign flow data from net foreign endpoints"""
     from collectors import DailyDataCollector
     from datetime import datetime, timedelta
 
     init_db()
     collector = DailyDataCollector()
 
-    if args.backfill:
+    if getattr(args, "fill_missing", False):
+        if not args.start or not args.end:
+            print("Missing --start/--end for fill-missing mode.")
+            return
+        collector.backfill_foreign_flow_missing(
+            start_date=args.start,
+            end_date=args.end
+        )
+    elif args.backfill:
         # Backfill historical data
         if not args.start or not args.end:
             # Default to last 30 days
@@ -256,7 +252,7 @@ def cmd_collect_foreign(args):
         print("WARNING: This is slow (~0.5s per stock). Press Ctrl+C to cancel.")
         collector.backfill_foreign_flow(start_date=start_date, end_date=end_date)
     else:
-        # Collect today's data from movers
+        # Collect today's data from net foreign endpoints
         collector.collect_foreign_flow(date=args.date)
 
 
@@ -335,17 +331,11 @@ Examples:
     intraday_parser = subparsers.add_parser("collect-intraday", help="Collect intraday OHLCV data")
     intraday_parser.add_argument("--days", type=int, default=5, help="Days of intraday data to collect")
 
-    # Collect movers data command
-    movers_parser = subparsers.add_parser("collect-movers", help="Collect daily movers data")
-    movers_parser.add_argument("--backfill", action="store_true", help="Backfill movers from DB history")
-    movers_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
-    movers_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
-    movers_parser.add_argument("--top", type=int, default=50, help="Top N per mover type")
-
     # Collect foreign flow data command
     foreign_parser = subparsers.add_parser("collect-foreign", help="Collect foreign flow data")
     foreign_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD), defaults to today")
     foreign_parser.add_argument("--backfill", action="store_true", help="Backfill historical data (slow)")
+    foreign_parser.add_argument("--fill-missing", action="store_true", help="Fill missing foreign flow days (per-day calls)")
     foreign_parser.add_argument("--start", type=str, help="Start date for backfill (YYYY-MM-DD)")
     foreign_parser.add_argument("--end", type=str, help="End date for backfill (YYYY-MM-DD)")
 
@@ -363,7 +353,6 @@ Examples:
         "collect-broker": cmd_collect_broker,
         "collect-insider": cmd_collect_insider,
         "collect-intraday": cmd_collect_intraday,
-        "collect-movers": cmd_collect_movers,
         "collect-foreign": cmd_collect_foreign,
         "load-historical": cmd_load_historical,
         "predict": cmd_predict,

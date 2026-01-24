@@ -6,7 +6,7 @@ Indonesian Stock Market rule-based daily ranking system using MA50 + Momentum + 
 Overview
 --------
 - **Strategy**: MA50 trend filter + momentum + foreign flow scoring
-- **Data sources**: Datasaham API (daily OHLCV, foreign flow, movers)
+- **Data sources**: Datasaham API (daily OHLCV, foreign flow)
 - **Storage**: SQLite (`database/quants.db`)
 - **Output**: Top 3 ranked stock picks after market close (symbol, name, score)
 - **Performance**: 31.94% precision (3.1x better than random)
@@ -34,12 +34,7 @@ Quick Start
    python main.py load-historical --days 365
    ```
 
-5. Backfill movers data:
-   ```bash
-   python main.py collect-movers --backfill --start 2025-01-20 --end 2026-01-23 --top 50
-   ```
-
-6. Generate ranked picks:
+5. Generate ranked picks:
    ```bash
    python main.py predict --top 3
    ```
@@ -71,7 +66,6 @@ The strategy uses 5 scoring components:
 | Foreign | 10% | Net foreign flow |
 
 **Filters:**
-- Movers filter: Only trade stocks in top value/volume/frequency lists
 - Above MA50: Price must be above 50-day MA
 - Not overextended: Max 15% above MA50
 - Slope not falling: MA50 must not be declining sharply
@@ -86,7 +80,7 @@ python main.py collect-stocks          # Collect stock universe
 python main.py collect-data            # Collect daily OHLCV
 python main.py collect-foreign         # Collect foreign flow (today)
 python main.py collect-foreign --backfill  # Backfill foreign flow
-python main.py collect-movers          # Collect movers lists
+python main.py collect-foreign --fill-missing --start 2025-01-01 --end 2025-12-31  # Fill missing days (resumes via cache/foreign_backfill_state.json)
 python main.py load-historical --days 365  # Load historical data
 
 # Predictions
@@ -110,7 +104,6 @@ Configuration
 Edit `config.py`:
 - `TOP_PICKS_COUNT`: Number of stocks to pick (default: 3)
 - `TOP_GAINER_THRESHOLD`: Target return threshold (default: 5%)
-- `MOVERS_FILTER_ENABLED`: Enable movers filter (default: True)
 - `RULE_SCORE_WEIGHT_*`: Scoring component weights
 - See `docs/STRATEGY.md` for all parameters
 
@@ -128,4 +121,3 @@ Repository Notes
 ----------------
 - `database/quants.db` is tracked with Git LFS. After cloning, run `git lfs pull`.
 - Foreign flow data is collected daily and accumulates over time.
-- The movers filter significantly improves precision (+4%).
