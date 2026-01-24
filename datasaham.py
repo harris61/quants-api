@@ -3,6 +3,7 @@ Datasaham.io API Client
 Indonesian Stock Market Data API
 """
 
+import time
 import requests
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
@@ -24,14 +25,33 @@ class DatasahamAPI:
     def _request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Base request method"""
         url = f"{self.BASE_URL}/{endpoint}"
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
+        timeout_s = 60
+        retries = 3
+        backoff_s = 5
+        last_exc = None
 
-        if not data.get("success"):
-            raise Exception(data.get("error", "Unknown error"))
-
-        return data.get("data", data)
+        for attempt in range(retries):
+            try:
+                response = self.session.get(url, params=params, timeout=timeout_s)
+                response.raise_for_status()
+                data = response.json()
+                if not data.get("success"):
+                    raise Exception(data.get("error", "Unknown error"))
+                return data.get("data", data)
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt < retries - 1:
+                    time.sleep(backoff_s * (2 ** attempt))
+                    continue
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if attempt < retries - 1:
+                    time.sleep(backoff_s * (2 ** attempt))
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
 
     # ==================== MAIN ====================
 
