@@ -63,7 +63,7 @@ HISTORICAL_DAYS = 365  # 1 year
 DAILY_COLLECT_DAYS = 30
 
 # Rate limiting for API calls (seconds between calls)
-API_RATE_LIMIT = 0.5
+API_RATE_LIMIT = 0.2
 
 # ==================== SYMBOL FILTER ====================
 # Only include normal equity tickers (IDX equities are 4 uppercase letters)
