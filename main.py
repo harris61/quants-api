@@ -237,7 +237,9 @@ def cmd_collect_foreign(args):
             return
         collector.backfill_foreign_flow_missing(
             start_date=args.start,
-            end_date=args.end
+            end_date=args.end,
+            mode=args.fill_missing_mode,
+            chunk_days=args.fill_missing_chunk_days,
         )
     elif args.backfill:
         # Backfill historical data
@@ -336,6 +338,18 @@ Examples:
     foreign_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD), defaults to today")
     foreign_parser.add_argument("--backfill", action="store_true", help="Backfill historical data (slow)")
     foreign_parser.add_argument("--fill-missing", action="store_true", help="Fill missing foreign flow days (per-day calls)")
+    foreign_parser.add_argument(
+        "--fill-missing-mode",
+        choices=["per-day", "per-symbol"],
+        default="per-day",
+        help="Fill-missing strategy: per-day (accurate, slow) or per-symbol (fewer API calls)",
+    )
+    foreign_parser.add_argument(
+        "--fill-missing-chunk-days",
+        type=int,
+        default=0,
+        help="Chunk size for per-symbol fill-missing (e.g., 30). Use 0 to disable.",
+    )
     foreign_parser.add_argument("--start", type=str, help="Start date for backfill (YYYY-MM-DD)")
     foreign_parser.add_argument("--end", type=str, help="End date for backfill (YYYY-MM-DD)")
 

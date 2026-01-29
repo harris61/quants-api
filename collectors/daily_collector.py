@@ -292,6 +292,81 @@ class DailyDataCollector:
         print(f"Foreign flow collection: {stats['updated']} updated, {stats['not_found']} not found")
         return stats
 
+    def _fetch_broker_daily_foreign(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        chunk_days: Optional[int] = None,
+    ) -> Dict[str, Dict[str, float]]:
+        """Fetch broker summary and aggregate foreign buy/sell by date for a symbol."""
+        def _merge_into(target: Dict[str, Dict[str, float]], source: Dict[str, Dict[str, float]]) -> None:
+            for date, data in source.items():
+                if date not in target:
+                    target[date] = {"buy": 0.0, "sell": 0.0}
+                target[date]["buy"] += data.get("buy", 0.0)
+                target[date]["sell"] += data.get("sell", 0.0)
+
+        def _fetch_range(range_start: str, range_end: str) -> Dict[str, Dict[str, float]]:
+            result = self.api._request(f"market-detector/broker-summary/{symbol}", {
+                "from": range_start,
+                "to": range_end,
+                "transactionType": "TRANSACTION_TYPE_NET",
+                "investorType": "INVESTOR_TYPE_FOREIGN",
+                "limit": 100,
+            })
+
+            broker_data = {}
+            if isinstance(result, dict):
+                broker_data = result.get("broker_summary") or result.get("brokerSummary") or {}
+                if not broker_data and isinstance(result.get("data"), dict):
+                    broker_data = (
+                        result["data"].get("broker_summary")
+                        or result["data"].get("brokerSummary")
+                        or {}
+                    )
+            brokers_buy = broker_data.get("brokers_buy") or broker_data.get("brokersBuy") or []
+            brokers_sell = broker_data.get("brokers_sell") or broker_data.get("brokersSell") or []
+
+            daily_foreign: Dict[str, Dict[str, float]] = {}
+            for broker in brokers_buy:
+                date_str = broker.get("netbs_date") or broker.get("date") or broker.get("trade_date") or ""
+                if not date_str:
+                    continue
+                date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                if date not in daily_foreign:
+                    daily_foreign[date] = {"buy": 0.0, "sell": 0.0}
+                daily_foreign[date]["buy"] += float(broker.get("bval", 0) or 0)
+
+            for broker in brokers_sell:
+                date_str = broker.get("netbs_date") or broker.get("date") or broker.get("trade_date") or ""
+                if not date_str:
+                    continue
+                date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                if date not in daily_foreign:
+                    daily_foreign[date] = {"buy": 0.0, "sell": 0.0}
+                daily_foreign[date]["sell"] += float(broker.get("sval", 0) or 0)
+
+            return daily_foreign
+
+        if not chunk_days or chunk_days <= 0:
+            return _fetch_range(start_date, end_date)
+
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            return _fetch_range(start_date, end_date)
+
+        merged: Dict[str, Dict[str, float]] = {}
+        current = start
+        while current <= end:
+            chunk_end = min(current + timedelta(days=chunk_days - 1), end)
+            chunk_data = _fetch_range(current.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d"))
+            _merge_into(merged, chunk_data)
+            current = chunk_end + timedelta(days=1)
+        return merged
+
     def backfill_foreign_flow(
         self,
         start_date: str,
@@ -331,48 +406,7 @@ class DailyDataCollector:
 
         for symbol in iterator:
             try:
-                # Get broker summary with foreign investor filter
-                result = self.api._request(f"market-detector/broker-summary/{symbol}", {
-                    "from": start_date,
-                    "to": end_date,
-                    "transactionType": "TRANSACTION_TYPE_NET",
-                    "investorType": "INVESTOR_TYPE_FOREIGN",
-                    "limit": 100
-                })
-
-                # Extract daily foreign flow from broker data
-                broker_data = {}
-                if isinstance(result, dict):
-                    broker_data = result.get("broker_summary") or result.get("brokerSummary") or {}
-                    if not broker_data and isinstance(result.get("data"), dict):
-                        broker_data = (
-                            result["data"].get("broker_summary")
-                            or result["data"].get("brokerSummary")
-                            or {}
-                        )
-                brokers_buy = broker_data.get("brokers_buy") or broker_data.get("brokersBuy") or []
-                brokers_sell = broker_data.get("brokers_sell") or broker_data.get("brokersSell") or []
-
-                # Group by date
-                daily_foreign = {}
-                for broker in brokers_buy:
-                    date_str = broker.get("netbs_date") or broker.get("date") or broker.get("trade_date") or ""
-                    if not date_str:
-                        continue
-                    # Convert YYYYMMDD to YYYY-MM-DD
-                    date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-                    if date not in daily_foreign:
-                        daily_foreign[date] = {"buy": 0, "sell": 0}
-                    daily_foreign[date]["buy"] += float(broker.get("bval", 0) or 0)
-
-                for broker in brokers_sell:
-                    date_str = broker.get("netbs_date") or broker.get("date") or broker.get("trade_date") or ""
-                    if not date_str:
-                        continue
-                    date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-                    if date not in daily_foreign:
-                        daily_foreign[date] = {"buy": 0, "sell": 0}
-                    daily_foreign[date]["sell"] += float(broker.get("sval", 0) or 0)
+                daily_foreign = self._fetch_broker_daily_foreign(symbol, start_date, end_date)
 
                 # Update daily_prices records
                 with session_scope() as session:
@@ -410,7 +444,9 @@ class DailyDataCollector:
         end_date: str,
         symbols: List[str] = None,
         show_progress: bool = True,
-        coverage_threshold: int = 0
+        coverage_threshold: int = 0,
+        mode: str = "per-day",
+        chunk_days: Optional[int] = None,
     ) -> Dict[str, int]:
         """
         Fill missing foreign flow days using per-day API calls.
@@ -490,6 +526,51 @@ class DailyDataCollector:
             with session_scope() as session:
                 stocks = session.query(Stock).filter(Stock.is_active == True).all()
                 symbols = [s.symbol for s in stocks if self._is_equity_symbol(s.symbol)]
+
+        if mode == "per-symbol":
+            missing_dates_str = {
+                d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                for d in missing_dates
+            }
+            iterator = tqdm(symbols, desc="Backfilling foreign flow (per-symbol)") if show_progress else symbols
+            for symbol in iterator:
+                try:
+                    daily_foreign = self._fetch_broker_daily_foreign(
+                        symbol,
+                        start_date,
+                        end_date,
+                        chunk_days=chunk_days,
+                    )
+                    if not daily_foreign:
+                        continue
+                    with session_scope() as session:
+                        stock = get_stock_by_symbol(session, symbol)
+                        if not stock:
+                            continue
+                        for date, data in daily_foreign.items():
+                            if date not in missing_dates_str:
+                                continue
+                            price_record = session.query(DailyPrice).filter(
+                                DailyPrice.stock_id == stock.id,
+                                DailyPrice.date == date
+                            ).first()
+                            if price_record:
+                                price_record.foreign_buy = data["buy"]
+                                price_record.foreign_sell = data["sell"]
+                                price_record.foreign_net = data["buy"] - data["sell"]
+                                stats["records_updated"] += 1
+                    stats["errors"] += 0
+                    time.sleep(API_RATE_LIMIT)
+                except Exception as e:
+                    if show_progress:
+                        tqdm.write(f"Error for {symbol}: {e}")
+                    stats["errors"] += 1
+                    continue
+            print(
+                f"\nMissing-date backfill (per-symbol) complete: {stats['dates_missing']} dates, "
+                f"{stats['records_updated']} records updated, {stats['errors']} errors"
+            )
+            return stats
 
         iterator = tqdm(missing_dates, desc="Backfilling missing dates") if show_progress else missing_dates
         for date in iterator:
