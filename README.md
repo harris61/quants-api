@@ -80,7 +80,6 @@ python main.py collect-stocks          # Collect stock universe
 python main.py collect-data            # Collect daily OHLCV
 python main.py collect-foreign         # Collect foreign flow (today)
 python main.py collect-foreign --backfill  # Backfill foreign flow
-python main.py collect-foreign --fill-missing --start 2025-01-01 --end 2025-12-31  # Fill missing days (resumes via cache/foreign_backfill_state.json)
 python main.py load-historical --days 365  # Load historical data
 
 # Predictions

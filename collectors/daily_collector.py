@@ -3,18 +3,15 @@ Daily Data Collector - Collect daily OHLCV and trading data
 """
 
 import time
-import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
-from sqlalchemy import func, case
 
 from datasaham import DatasahamAPI
 from database import (
     session_scope, get_stock_by_symbol, Stock, DailyPrice,
     bulk_upsert_daily_prices
 )
-from config import BASE_DIR
 import re
 
 from config import DATASAHAM_API_KEY, API_RATE_LIMIT, EQUITY_SYMBOL_REGEX
@@ -437,160 +434,6 @@ class DailyDataCollector:
 
         print(f"\nBackfill complete: {stats['stocks_processed']} stocks, {stats['records_updated']} records updated, {stats['errors']} errors")
         return stats
-
-    def backfill_foreign_flow_missing(
-        self,
-        start_date: str,
-        end_date: str,
-        symbols: List[str] = None,
-        show_progress: bool = True,
-        coverage_threshold: int = 0,
-        mode: str = "per-day",
-        chunk_days: Optional[int] = None,
-    ) -> Dict[str, int]:
-        """
-        Fill missing foreign flow days using per-day API calls.
-
-        Args:
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
-            symbols: Optional list of symbols to backfill.
-            show_progress: Show progress bars.
-            coverage_threshold: Max rows with foreign_net to treat as missing.
-
-        Returns:
-            Dict with aggregate stats.
-        """
-        cache_dir = BASE_DIR / "cache"
-        cache_dir.mkdir(exist_ok=True)
-        state_path = cache_dir / "foreign_backfill_state.json"
-
-        def _load_state() -> dict:
-            if not state_path.exists():
-                return {}
-            try:
-                return json.loads(state_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return {}
-
-        def _save_state(last_completed: str) -> None:
-            payload = {
-                "start_date": start_date,
-                "end_date": end_date,
-                "last_completed_date": last_completed,
-            }
-            state_path.write_text(json.dumps(payload), encoding="utf-8")
-
-        with session_scope() as session:
-            coverage_rows = session.query(
-                DailyPrice.date,
-                func.count(DailyPrice.id),
-                func.sum(case((DailyPrice.foreign_net.isnot(None), 1), else_=0))
-            ).filter(
-                DailyPrice.date >= start_date,
-                DailyPrice.date <= end_date
-            ).group_by(DailyPrice.date).order_by(DailyPrice.date).all()
-
-        missing_dates = [
-            row[0] for row in coverage_rows
-            if (row[2] or 0) <= coverage_threshold
-        ]
-
-        state = _load_state()
-        resume_date = None
-        if state.get("start_date") == start_date and state.get("end_date") == end_date:
-            resume_value = state.get("last_completed_date")
-            if resume_value:
-                try:
-                    resume_date = datetime.strptime(resume_value, "%Y-%m-%d").date()
-                except ValueError:
-                    resume_date = None
-
-        if resume_date:
-            missing_dates = [d for d in missing_dates if d >= resume_date]
-            if resume_date not in missing_dates:
-                missing_dates.insert(0, resume_date)
-
-        stats = {
-            "dates_checked": len(coverage_rows),
-            "dates_missing": len(missing_dates),
-            "records_updated": 0,
-            "errors": 0,
-        }
-
-        if not missing_dates:
-            print("No missing foreign flow dates found.")
-            return stats
-
-        if symbols is None:
-            with session_scope() as session:
-                stocks = session.query(Stock).filter(Stock.is_active == True).all()
-                symbols = [s.symbol for s in stocks if self._is_equity_symbol(s.symbol)]
-
-        if mode == "per-symbol":
-            missing_dates_str = {
-                d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
-                for d in missing_dates
-            }
-            iterator = tqdm(symbols, desc="Backfilling foreign flow (per-symbol)") if show_progress else symbols
-            for symbol in iterator:
-                try:
-                    daily_foreign = self._fetch_broker_daily_foreign(
-                        symbol,
-                        start_date,
-                        end_date,
-                        chunk_days=chunk_days,
-                    )
-                    if not daily_foreign:
-                        continue
-                    with session_scope() as session:
-                        stock = get_stock_by_symbol(session, symbol)
-                        if not stock:
-                            continue
-                        for date, data in daily_foreign.items():
-                            if date not in missing_dates_str:
-                                continue
-                            price_record = session.query(DailyPrice).filter(
-                                DailyPrice.stock_id == stock.id,
-                                DailyPrice.date == date
-                            ).first()
-                            if price_record:
-                                price_record.foreign_buy = data["buy"]
-                                price_record.foreign_sell = data["sell"]
-                                price_record.foreign_net = data["buy"] - data["sell"]
-                                stats["records_updated"] += 1
-                    stats["errors"] += 0
-                    time.sleep(API_RATE_LIMIT)
-                except Exception as e:
-                    if show_progress:
-                        tqdm.write(f"Error for {symbol}: {e}")
-                    stats["errors"] += 1
-                    continue
-            print(
-                f"\nMissing-date backfill (per-symbol) complete: {stats['dates_missing']} dates, "
-                f"{stats['records_updated']} records updated, {stats['errors']} errors"
-            )
-            return stats
-
-        iterator = tqdm(missing_dates, desc="Backfilling missing dates") if show_progress else missing_dates
-        for date in iterator:
-            print(f"Backfilling date: {date}")
-            result = self.backfill_foreign_flow(
-                start_date=str(date),
-                end_date=str(date),
-                symbols=symbols,
-                show_progress=False
-            )
-            stats["records_updated"] += result.get("records_updated", 0)
-            stats["errors"] += result.get("errors", 0)
-            _save_state(str(date))
-
-        print(
-            f"\nMissing-date backfill complete: {stats['dates_missing']} dates, "
-            f"{stats['records_updated']} records updated, {stats['errors']} errors"
-        )
-        return stats
-
 
 def collect_daily():
     """CLI function to collect daily data"""

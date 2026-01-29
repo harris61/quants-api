@@ -156,9 +156,6 @@ python main.py collect-foreign
 # Backfill historical (slow, ~0.5s per stock)
 python main.py collect-foreign --backfill --start 2025-12-01 --end 2026-01-23
 
-# Fill missing days (per-day calls)
-python main.py collect-foreign --fill-missing --start 2025-01-01 --end 2025-12-31
-# Resume progress stored in cache/foreign_backfill_state.json
 ```
 
 ---
