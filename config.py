@@ -31,15 +31,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 
 # ==================== API KEYS ====================
 # API keys must be set via environment variables or .env file
-DATASAHAM_API_KEY = os.getenv("DATASAHAM_API_KEY")
-if not DATASAHAM_API_KEY:
-    import warnings
-    warnings.warn(
-        "DATASAHAM_API_KEY not set. Please set it in .env file or environment variables. "
-        "Get your API key from https://datasaham.io",
-        UserWarning
-    )
-    DATASAHAM_API_KEY = ""  # Will fail gracefully when API is called
+DATASAHAM_API_KEY = os.getenv("DATASAHAM_API_KEY", "")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")

@@ -202,7 +202,14 @@ def cmd_collect_broker(args):
 
     init_db()
     collector = BrokerSummaryCollector()
-    collector.collect_today()
+    if args.start and args.end:
+        collector.collect_range(args.start, args.end)
+    elif args.date:
+        from datetime import datetime
+        target_date = datetime.strptime(args.date, "%Y-%m-%d")
+        collector.collect_and_save(date=target_date)
+    else:
+        collector.collect_today()
 
 
 def cmd_collect_insider(args):
@@ -315,6 +322,9 @@ Examples:
 
     # Collect broker data command
     broker_parser = subparsers.add_parser("collect-broker", help="Collect broker summary data")
+    broker_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD)")
+    broker_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    broker_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
 
     # Collect insider data command
     insider_parser = subparsers.add_parser("collect-insider", help="Collect insider trading data")

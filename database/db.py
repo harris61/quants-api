@@ -3,7 +3,7 @@ Database connection and session management for Quants-API
 """
 
 from contextlib import contextmanager
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -15,7 +15,10 @@ from database.models import Base
 engine = create_engine(
     DATABASE_URL,
     echo=False,  # Set True for SQL debugging
-    connect_args={"check_same_thread": False}  # Required for SQLite
+    connect_args={
+        "check_same_thread": False,  # Required for SQLite
+        "timeout": 30,  # seconds to wait on locked database
+    }
 )
 
 # Session factory
@@ -26,10 +29,26 @@ def init_db():
     """Initialize database - create all tables"""
     try:
         Base.metadata.create_all(bind=engine)
+        _ensure_broker_category_column()
     except OperationalError as exc:
         if "already exists" not in str(exc):
             raise
     print(f"Database initialized at: {DATABASE_URL}")
+
+
+def _ensure_broker_category_column() -> None:
+    """Add broker_category column to broker_summaries if missing (SQLite)."""
+    with engine.begin() as conn:
+        table = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='broker_summaries'")
+        ).fetchone()
+        if not table:
+            return
+        cols = conn.execute(text("PRAGMA table_info('broker_summaries')")).fetchall()
+        col_names = {row[1] for row in cols}
+        if "broker_category" in col_names:
+            return
+        conn.execute(text("ALTER TABLE broker_summaries ADD COLUMN broker_category VARCHAR(50)"))
 
 
 def drop_db():

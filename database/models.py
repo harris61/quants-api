@@ -232,6 +232,7 @@ class BrokerSummary(Base):
     # Broker identification
     broker_code = Column(String(10), nullable=False)
     broker_name = Column(String(100))
+    broker_category = Column(String(50))
 
     # Activity data
     buy_value = Column(Float)        # Total buy value

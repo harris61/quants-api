@@ -24,6 +24,10 @@ class DatasahamAPI:
 
     def _request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Base request method"""
+        if not self.api_key:
+            raise RuntimeError(
+                "DATASAHAM_API_KEY not set. Please set it in .env file or environment variables."
+            )
         url = f"{self.BASE_URL}/{endpoint}"
         timeout_s = 60
         retries = 3

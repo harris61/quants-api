@@ -3,7 +3,7 @@ Broker Summary Collector - Collect broker activity data for all stocks
 """
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
 
@@ -13,6 +13,7 @@ from database import (
 )
 from database.models import BrokerSummary
 from config import DATASAHAM_API_KEY, API_RATE_LIMIT
+from utils.brokers import load_broker_categories
 
 
 class BrokerSummaryCollector:
@@ -20,6 +21,7 @@ class BrokerSummaryCollector:
 
     def __init__(self, api_key: str = None):
         self.api = DatasahamAPI(api_key or DATASAHAM_API_KEY)
+        self._broker_categories = load_broker_categories()
 
     def _parse_number(self, value) -> float:
         """Parse numeric values that may be formatted as strings with commas"""
@@ -141,11 +143,20 @@ class BrokerSummaryCollector:
             )
             if not broker_code:
                 continue
+            broker_code = broker_code.strip().upper()
+            category_entry = self._broker_categories.get(broker_code, {})
+            broker_name = (
+                broker.get("broker_name")
+                or broker.get("name")
+                or broker.get("brokerName")
+                or category_entry.get("broker_name")
+            )
 
             parsed.append({
                 "date": date.date() if isinstance(date, datetime) else date,
                 "broker_code": broker_code,
-                "broker_name": broker.get("broker_name") or broker.get("name") or broker.get("brokerName"),
+                "broker_name": broker_name,
+                "broker_category": category_entry.get("category") or None,
                 "buy_value": self._parse_number(broker.get("buy_value") or broker.get("bval") or broker.get("buyValue")),
                 "sell_value": self._parse_number(broker.get("sell_value") or broker.get("sval") or broker.get("sellValue")),
                 "net_value": self._parse_number(broker.get("net_value") or broker.get("nval") or broker.get("netValue")),
@@ -177,7 +188,8 @@ class BrokerSummaryCollector:
     def collect_and_save(
         self,
         symbols: List[str] = None,
-        show_progress: bool = True
+        show_progress: bool = True,
+        date: datetime = None
     ) -> Dict[str, int]:
         """
         Collect and save broker summary data for multiple stocks
@@ -185,12 +197,13 @@ class BrokerSummaryCollector:
         Args:
             symbols: List of stock symbols. If None, uses all active stocks.
             show_progress: Show progress bar
+            date: Specific date to collect (defaults to today)
 
         Returns:
             Dict with collection statistics
         """
         stats = {"success": 0, "failed": 0, "records": 0}
-        today = datetime.now()
+        target_date = date or datetime.now()
 
         if symbols is None:
             with session_scope() as session:
@@ -205,10 +218,10 @@ class BrokerSummaryCollector:
 
         for symbol in iterator:
             try:
-                broker_data = self.get_broker_summary(symbol, date=today)
+                broker_data = self.get_broker_summary(symbol, date=target_date)
 
                 if broker_data:
-                    parsed = self.parse_broker_data(broker_data, today)
+                    parsed = self.parse_broker_data(broker_data, target_date)
 
                     if parsed:
                         with session_scope() as session:
@@ -237,6 +250,25 @@ class BrokerSummaryCollector:
     def collect_today(self) -> Dict[str, int]:
         """Collect today's broker summary for all stocks"""
         return self.collect_and_save()
+
+    def collect_range(self, start_date: str, end_date: str) -> Dict[str, Dict[str, int]]:
+        """Collect broker summaries for all stocks in a date range (inclusive)."""
+        def _to_date(value: str) -> datetime:
+            return datetime.strptime(value, "%Y-%m-%d")
+
+        start = _to_date(start_date)
+        end = _to_date(end_date)
+        if end < start:
+            raise ValueError("end_date must be >= start_date")
+
+        results = {}
+        current = start
+        while current <= end:
+            date_str = current.strftime("%Y-%m-%d")
+            print(f"\nCollecting broker summaries for {date_str}...")
+            results[date_str] = self.collect_and_save(date=current)
+            current = current + timedelta(days=1)
+        return results
 
 
 if __name__ == "__main__":
