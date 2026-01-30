@@ -87,6 +87,12 @@ INTRADAY_COLLECTION_ENABLED = True
 INTRADAY_INTERVAL = "1h"  # Hourly candles
 INTRADAY_DAYS = 5  # Days of intraday data to keep
 
+# ==================== DIVERGENCE ANALYSIS ====================
+DIVERGENCE_ENABLED = True
+DIVERGENCE_TOP_N = 10
+DIVERGENCE_SMART_BROKERS = ["MG", "CP", "AK", "BK", "DX", "SS", "KI", "AO"]
+DIVERGENCE_RETAIL_BROKERS = ["XL", "XC", "YP", "PD", "CC"]
+
 # ==================== RULE-BASED SETTINGS ====================
 # MA50-only rule-based daily ranking
 RULE_BASED_MODEL_NAME = "rule_ma50_v2"

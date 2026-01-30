@@ -14,10 +14,21 @@ from database.models import DailyPrice, Stock
 from collectors import (
     DailyDataCollector,
     HistoricalDataLoader,
+    BrokerSummaryCollector,
 )
 from models.rule_based import RuleBasedPredictor
 from notifications import TelegramNotifier
-from config import LOG_FILE, LOG_LEVEL, TOP_PICKS_COUNT, DAILY_COLLECT_DAYS
+from config import (
+    LOG_FILE,
+    LOG_LEVEL,
+    TOP_PICKS_COUNT,
+    DAILY_COLLECT_DAYS,
+    BROKER_COLLECTION_ENABLED,
+    DIVERGENCE_ENABLED,
+    DIVERGENCE_TOP_N,
+    DIVERGENCE_SMART_BROKERS,
+    DIVERGENCE_RETAIL_BROKERS,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -110,6 +121,36 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     except Exception as e:
         logger.error(f"Foreign flow collection failed: {e}")
         results["errors"].append(f"Foreign flow: {e}")
+
+    # Step 1c: Collect broker summary data
+    if BROKER_COLLECTION_ENABLED:
+        logger.info("\n[Step 1c] Collecting broker summary data...")
+        try:
+            broker_collector = BrokerSummaryCollector()
+            broker_stats = broker_collector.collect_today()
+            results["broker_summary_stats"] = broker_stats
+            logger.info(
+                f"Broker summary: {broker_stats['success']} stocks, {broker_stats['records']} records"
+            )
+        except Exception as e:
+            logger.error(f"Broker summary collection failed: {e}")
+            results["errors"].append(f"Broker summary: {e}")
+
+    # Step 1d: Divergence analysis
+    if DIVERGENCE_ENABLED:
+        logger.info("\n[Step 1d] Running divergence analysis...")
+        try:
+            from scripts.divergence_analysis import run as run_divergence
+            today = datetime.now().strftime("%Y-%m-%d")
+            run_divergence(
+                today,
+                DIVERGENCE_SMART_BROKERS,
+                DIVERGENCE_RETAIL_BROKERS,
+                DIVERGENCE_TOP_N,
+            )
+        except Exception as e:
+            logger.error(f"Divergence analysis failed: {e}")
+            results["errors"].append(f"Divergence analysis: {e}")
 
     # Sanity check: ensure latest daily data matches today
     data_ready = results["data_collected"]

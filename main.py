@@ -297,6 +297,18 @@ def cmd_market_cap_report(args):
         print(f"{idx:>2}. {symbol:<6} {name or '-':<40} {market_cap}")
 
 
+def cmd_divergence(args):
+    """Run broker divergence analysis"""
+    from scripts.divergence_analysis import run, parse_codes
+
+    run(
+        args.date,
+        parse_codes(args.smart),
+        parse_codes(args.retail),
+        args.limit,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quants-API - Indonesian Stock Market Rule-Based Ranking System",
@@ -391,6 +403,13 @@ Examples:
     mc_report_parser = subparsers.add_parser("market-cap-top", help="Show top stocks by market cap")
     mc_report_parser.add_argument("--top", type=int, default=20, help="Number of rows to show")
 
+    # Divergence analysis command
+    divergence_parser = subparsers.add_parser("divergence", help="Broker divergence analysis")
+    divergence_parser.add_argument("--date", type=str, required=True, help="Date for analysis (YYYY-MM-DD)")
+    divergence_parser.add_argument("--smart", type=str, required=True, help="Comma-separated smart broker codes")
+    divergence_parser.add_argument("--retail", type=str, required=True, help="Comma-separated retail broker codes")
+    divergence_parser.add_argument("--limit", type=int, default=10, help="Top N results")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -408,6 +427,7 @@ Examples:
         "collect-foreign": cmd_collect_foreign,
         "collect-market-cap": cmd_collect_market_cap,
         "market-cap-top": cmd_market_cap_report,
+        "divergence": cmd_divergence,
         "load-historical": cmd_load_historical,
         "predict": cmd_predict,
         "predict-scores": cmd_predict_scores,
