@@ -204,6 +204,26 @@ def cmd_collect_broker(args):
     collector = BrokerSummaryCollector()
     if args.start and args.end:
         collector.collect_range(args.start, args.end)
+    elif getattr(args, "days", None):
+        from datetime import datetime, timedelta
+        from utils.holidays import is_trading_day
+
+        end_date = datetime.now().date()
+        if args.end:
+            end_date = datetime.strptime(args.end, "%Y-%m-%d").date()
+
+        days = max(1, int(args.days))
+        current = end_date
+        count = 0
+        while count < days:
+            if is_trading_day(current):
+                count += 1
+            if count >= days:
+                break
+            current = current - timedelta(days=1)
+        start_date = current.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        collector.collect_range(start_date, end_str)
     elif args.date:
         from datetime import datetime
         target_date = datetime.strptime(args.date, "%Y-%m-%d")
@@ -269,6 +289,49 @@ def cmd_collect_market_cap(args):
             symbols.extend([s.strip().upper() for s in item.split(",") if s.strip()])
 
     collector.collect_and_save(symbols=symbols, show_progress=not args.no_progress)
+
+
+def cmd_collect_market_cap_history(args):
+    """Collect market cap snapshots into history table"""
+    from collectors import MarketCapCollector
+    from utils.holidays import is_trading_day
+    from datetime import datetime, timedelta
+
+    init_db()
+    collector = MarketCapCollector()
+
+    if args.date:
+        snapshot_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        collector.collect_and_save(snapshot_date=snapshot_date, save_history=True, show_progress=not args.no_progress)
+        return
+
+    if not args.days:
+        print("Provide --date or --days for market cap history collection.")
+        return
+
+    if not args.use_current:
+        print("Refusing to backfill without --use-current (market cap API is current-only).")
+        return
+
+    end_date = datetime.now().date()
+    if args.end:
+        end_date = datetime.strptime(args.end, "%Y-%m-%d").date()
+
+    days = max(1, int(args.days))
+    dates = []
+    current = end_date
+    while len(dates) < days:
+        if is_trading_day(current):
+            dates.append(current)
+        current = current - timedelta(days=1)
+
+    dates = list(reversed(dates))
+    for day in dates:
+        collector.collect_and_save(
+            snapshot_date=day,
+            save_history=True,
+            show_progress=not args.no_progress,
+        )
 
 
 def cmd_market_cap_report(args):
@@ -379,6 +442,7 @@ Examples:
     broker_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD)")
     broker_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     broker_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    broker_parser.add_argument("--days", type=int, help="Number of trading days to backfill (uses --end or today)")
 
     # Collect insider data command
     insider_parser = subparsers.add_parser("collect-insider", help="Collect insider trading data")
@@ -398,6 +462,21 @@ Examples:
     market_cap_parser = subparsers.add_parser("collect-market-cap", help="Collect current market cap data")
     market_cap_parser.add_argument("--symbols", nargs="+", help="Optional list of symbols (space or comma separated)")
     market_cap_parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
+
+    # Collect market cap history command
+    market_cap_hist_parser = subparsers.add_parser(
+        "collect-market-cap-history",
+        help="Collect market cap snapshots into history table",
+    )
+    market_cap_hist_parser.add_argument("--date", type=str, help="Snapshot date label (YYYY-MM-DD)")
+    market_cap_hist_parser.add_argument("--days", type=int, help="Number of trading days to backfill (uses --end or today)")
+    market_cap_hist_parser.add_argument("--end", type=str, help="End date for backfill (YYYY-MM-DD)")
+    market_cap_hist_parser.add_argument(
+        "--use-current",
+        action="store_true",
+        help="Use current market cap values for backfill (API is current-only)",
+    )
+    market_cap_hist_parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
 
     # Market cap report command
     mc_report_parser = subparsers.add_parser("market-cap-top", help="Show top stocks by market cap")
@@ -426,6 +505,7 @@ Examples:
         "collect-intraday": cmd_collect_intraday,
         "collect-foreign": cmd_collect_foreign,
         "collect-market-cap": cmd_collect_market_cap,
+        "collect-market-cap-history": cmd_collect_market_cap_history,
         "market-cap-top": cmd_market_cap_report,
         "divergence": cmd_divergence,
         "load-historical": cmd_load_historical,

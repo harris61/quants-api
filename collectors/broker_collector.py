@@ -214,7 +214,10 @@ class BrokerSummaryCollector:
             print("No symbols to collect data for!")
             return stats
 
-        iterator = tqdm(symbols, desc="Collecting broker summaries") if show_progress else symbols
+        iterator = tqdm(
+            symbols,
+            desc=f"Collecting broker summaries ({target_date.date()})"
+        ) if show_progress else symbols
 
         for symbol in iterator:
             try:
@@ -244,15 +247,26 @@ class BrokerSummaryCollector:
                 stats["failed"] += 1
                 continue
 
-        print(f"\nBroker collection complete: {stats['success']} stocks, {stats['records']} records")
+        print(
+            f"\nBroker collection complete ({target_date.date()}): "
+            f"{stats['success']} stocks, {stats['records']} records"
+        )
         return stats
 
     def collect_today(self) -> Dict[str, int]:
         """Collect today's broker summary for all stocks"""
         return self.collect_and_save()
 
-    def collect_range(self, start_date: str, end_date: str) -> Dict[str, Dict[str, int]]:
-        """Collect broker summaries for all stocks in a date range (inclusive)."""
+    def collect_range(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: List[str] = None,
+        show_progress: bool = True,
+    ) -> Dict[str, Dict[str, int]]:
+        """Collect broker summaries for a date range (trading days only)."""
+        from utils.holidays import is_trading_day
+
         def _to_date(value: str) -> datetime:
             return datetime.strptime(value, "%Y-%m-%d")
 
@@ -261,13 +275,22 @@ class BrokerSummaryCollector:
         if end < start:
             raise ValueError("end_date must be >= start_date")
 
-        results = {}
+        dates = []
         current = start
         while current <= end:
-            date_str = current.strftime("%Y-%m-%d")
-            print(f"\nCollecting broker summaries for {date_str}...")
-            results[date_str] = self.collect_and_save(date=current)
+            if is_trading_day(current):
+                dates.append(current)
             current = current + timedelta(days=1)
+
+        iterator = tqdm(dates, desc="Collecting broker summaries (range)") if show_progress else dates
+        results = {}
+        for day in iterator:
+            date_str = day.strftime("%Y-%m-%d")
+            results[date_str] = self.collect_and_save(
+                symbols=symbols,
+                show_progress=False,
+                date=day,
+            )
         return results
 
 

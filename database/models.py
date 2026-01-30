@@ -37,6 +37,7 @@ class Stock(Base):
     broker_summaries = relationship("BrokerSummary", back_populates="stock", cascade="all, delete-orphan")
     insider_trades = relationship("InsiderTrade", back_populates="stock", cascade="all, delete-orphan")
     intraday_prices = relationship("IntradayPrice", back_populates="stock", cascade="all, delete-orphan")
+    market_cap_history = relationship("MarketCapHistory", back_populates="stock", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Stock(symbol='{self.symbol}', name='{self.name}')>"
@@ -302,6 +303,31 @@ class InsiderTrade(Base):
 
     def __repr__(self):
         return f"<InsiderTrade(stock_id={self.stock_id}, insider='{self.insider_name}', type='{self.transaction_type}')>"
+
+
+class MarketCapHistory(Base):
+    """Daily market cap snapshot per stock"""
+    __tablename__ = "market_cap_history"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+    date = Column(Date, nullable=False)
+
+    market_cap = Column(Float)
+    market_cap_formatted = Column(String(100))
+    market_cap_currency = Column(String(10))
+    created_at = Column(DateTime, default=dt.utcnow)
+
+    stock = relationship("Stock", back_populates="market_cap_history")
+
+    __table_args__ = (
+        UniqueConstraint('stock_id', 'date', name='uix_market_cap_history_stock_date'),
+        Index('ix_market_cap_history_stock_date', 'stock_id', 'date'),
+        Index('ix_market_cap_history_date', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<MarketCapHistory(stock_id={self.stock_id}, date='{self.date}')>"
 
 
 class IntradayPrice(Base):

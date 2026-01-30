@@ -4,13 +4,14 @@ Market Cap Collector - Collect current market cap from Datasaham sector/subsecto
 
 import time
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, List, Optional, Tuple
 
 from tqdm import tqdm
 
 from datasaham import DatasahamAPI
 from database import session_scope, get_stock_by_symbol, Stock
+from database.models import MarketCapHistory
 from config import DATASAHAM_API_KEY, API_RATE_LIMIT, EQUITY_SYMBOL_REGEX
 
 
@@ -89,12 +90,46 @@ class MarketCapCollector:
                 time.sleep(API_RATE_LIMIT)
         return companies
 
+    def _upsert_history(
+        self,
+        session,
+        stock_id: int,
+        snapshot_date: date,
+        market_cap: Optional[float],
+        formatted: Optional[str],
+        currency: Optional[str],
+    ) -> None:
+        """Upsert market cap snapshot for a stock/date."""
+        from sqlalchemy.dialects.sqlite import insert
+
+        record = {
+            "stock_id": stock_id,
+            "date": snapshot_date,
+            "market_cap": market_cap,
+            "market_cap_formatted": formatted,
+            "market_cap_currency": currency,
+        }
+        stmt = insert(MarketCapHistory).values(**record)
+        update_fields = {
+            "market_cap": stmt.excluded.market_cap,
+            "market_cap_formatted": stmt.excluded.market_cap_formatted,
+            "market_cap_currency": stmt.excluded.market_cap_currency,
+        }
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["stock_id", "date"],
+            set_=update_fields
+        )
+        session.execute(stmt)
+
     def collect_and_save(
         self,
         symbols: List[str] = None,
         show_progress: bool = True,
+        snapshot_date: Optional[date] = None,
+        save_history: bool = False,
     ) -> Dict[str, int]:
         stats = {"success": 0, "missing": 0, "not_found": 0, "failed": 0}
+        snap_date = snapshot_date or datetime.utcnow().date()
 
         if symbols:
             symbols = [s for s in symbols if self._is_equity_symbol(s)]
@@ -127,6 +162,15 @@ class MarketCapCollector:
                     stock.market_cap_formatted = formatted
                     stock.market_cap_currency = currency
                     stock.market_cap_updated_at = datetime.utcnow()
+                    if save_history:
+                        self._upsert_history(
+                            session,
+                            stock.id,
+                            snap_date,
+                            market_cap,
+                            formatted,
+                            currency,
+                        )
                     stats["success"] += 1
             except Exception as exc:
                 if show_progress:

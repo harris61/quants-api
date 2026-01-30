@@ -18,6 +18,7 @@ from database.models import (
     CorporateAction,
     BrokerSummary,
     InsiderTrade,
+    MarketCapHistory,
     IntradayPrice,
 )
 
@@ -39,5 +40,6 @@ __all__ = [
     "CorporateAction",
     "BrokerSummary",
     "InsiderTrade",
+    "MarketCapHistory",
     "IntradayPrice",
 ]
