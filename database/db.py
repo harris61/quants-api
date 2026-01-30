@@ -30,6 +30,7 @@ def init_db():
     try:
         Base.metadata.create_all(bind=engine)
         _ensure_broker_category_column()
+        _ensure_stock_market_cap_columns()
     except OperationalError as exc:
         if "already exists" not in str(exc):
             raise
@@ -49,6 +50,26 @@ def _ensure_broker_category_column() -> None:
         if "broker_category" in col_names:
             return
         conn.execute(text("ALTER TABLE broker_summaries ADD COLUMN broker_category VARCHAR(50)"))
+
+
+def _ensure_stock_market_cap_columns() -> None:
+    """Add market cap columns to stocks if missing (SQLite)."""
+    with engine.begin() as conn:
+        table = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='stocks'")
+        ).fetchone()
+        if not table:
+            return
+        cols = conn.execute(text("PRAGMA table_info('stocks')")).fetchall()
+        col_names = {row[1] for row in cols}
+        if "market_cap" not in col_names:
+            conn.execute(text("ALTER TABLE stocks ADD COLUMN market_cap FLOAT"))
+        if "market_cap_formatted" not in col_names:
+            conn.execute(text("ALTER TABLE stocks ADD COLUMN market_cap_formatted VARCHAR(100)"))
+        if "market_cap_currency" not in col_names:
+            conn.execute(text("ALTER TABLE stocks ADD COLUMN market_cap_currency VARCHAR(10)"))
+        if "market_cap_updated_at" not in col_names:
+            conn.execute(text("ALTER TABLE stocks ADD COLUMN market_cap_updated_at DATETIME"))
 
 
 def drop_db():

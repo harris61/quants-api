@@ -24,6 +24,10 @@ class Stock(Base):
     sector_name = Column(String(100))
     listing_date = Column(Date)
     is_active = Column(Boolean, default=True)
+    market_cap = Column(Float)
+    market_cap_formatted = Column(String(100))
+    market_cap_currency = Column(String(10))
+    market_cap_updated_at = Column(DateTime)
     created_at = Column(DateTime, default=dt.utcnow)
     updated_at = Column(DateTime, default=dt.utcnow, onupdate=dt.utcnow)
 

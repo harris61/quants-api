@@ -255,6 +255,48 @@ def cmd_collect_foreign(args):
         collector.collect_foreign_flow(date=args.date)
 
 
+def cmd_collect_market_cap(args):
+    """Collect current market cap data for stocks"""
+    from collectors import MarketCapCollector
+
+    init_db()
+    collector = MarketCapCollector()
+
+    symbols = None
+    if args.symbols:
+        symbols = []
+        for item in args.symbols:
+            symbols.extend([s.strip().upper() for s in item.split(",") if s.strip()])
+
+    collector.collect_and_save(symbols=symbols, show_progress=not args.no_progress)
+
+
+def cmd_market_cap_report(args):
+    """Show top stocks by market cap"""
+    from database import session_scope, Stock
+
+    top_n = max(1, int(args.top))
+    with session_scope() as session:
+        rows = (
+            session.query(Stock.symbol, Stock.name, Stock.market_cap)
+            .filter(Stock.market_cap.isnot(None))
+            .order_by(Stock.market_cap.desc())
+            .limit(top_n)
+            .all()
+        )
+
+    if not rows:
+        print("No market cap data found. Run: python main.py collect-market-cap")
+        return
+
+    print("\n" + "=" * 60)
+    print(f"TOP {top_n} MARKET CAP")
+    print("=" * 60)
+    for idx, row in enumerate(rows, start=1):
+        symbol, name, market_cap = row
+        print(f"{idx:>2}. {symbol:<6} {name or '-':<40} {market_cap}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quants-API - Indonesian Stock Market Rule-Based Ranking System",
@@ -340,6 +382,15 @@ Examples:
     foreign_parser.add_argument("--start", type=str, help="Start date for backfill (YYYY-MM-DD)")
     foreign_parser.add_argument("--end", type=str, help="End date for backfill (YYYY-MM-DD)")
 
+    # Collect market cap command
+    market_cap_parser = subparsers.add_parser("collect-market-cap", help="Collect current market cap data")
+    market_cap_parser.add_argument("--symbols", nargs="+", help="Optional list of symbols (space or comma separated)")
+    market_cap_parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
+
+    # Market cap report command
+    mc_report_parser = subparsers.add_parser("market-cap-top", help="Show top stocks by market cap")
+    mc_report_parser.add_argument("--top", type=int, default=20, help="Number of rows to show")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -355,6 +406,8 @@ Examples:
         "collect-insider": cmd_collect_insider,
         "collect-intraday": cmd_collect_intraday,
         "collect-foreign": cmd_collect_foreign,
+        "collect-market-cap": cmd_collect_market_cap,
+        "market-cap-top": cmd_market_cap_report,
         "load-historical": cmd_load_historical,
         "predict": cmd_predict,
         "predict-scores": cmd_predict_scores,

@@ -80,6 +80,8 @@ python main.py collect-stocks          # Collect stock universe
 python main.py collect-data            # Collect daily OHLCV
 python main.py collect-foreign         # Collect foreign flow (today)
 python main.py collect-foreign --backfill  # Backfill foreign flow
+python main.py collect-market-cap      # Collect current market cap (all stocks)
+python main.py market-cap-top --top 20 # Show top market cap
 python main.py load-historical --days 365  # Load historical data
 
 # Predictions
