@@ -90,6 +90,17 @@ class MarketCapCollector:
                 time.sleep(API_RATE_LIMIT)
         return companies
 
+    def _collect_companies(
+        self,
+        symbols: Optional[List[str]] = None,
+        show_progress: bool = True,
+    ) -> List[Dict[str, Any]]:
+        companies = self._get_all_companies(show_progress=show_progress)
+        if symbols:
+            wanted = {s.upper() for s in symbols}
+            companies = [c for c in companies if (c.get("symbol") or c.get("code") or "").upper() in wanted]
+        return companies
+
     def _upsert_history(
         self,
         session,
@@ -127,6 +138,7 @@ class MarketCapCollector:
         show_progress: bool = True,
         snapshot_date: Optional[date] = None,
         save_history: bool = False,
+        companies: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, int]:
         stats = {"success": 0, "missing": 0, "not_found": 0, "failed": 0}
         snap_date = snapshot_date or datetime.utcnow().date()
@@ -134,10 +146,8 @@ class MarketCapCollector:
         if symbols:
             symbols = [s for s in symbols if self._is_equity_symbol(s)]
 
-        companies = self._get_all_companies(show_progress=show_progress)
-        if symbols:
-            wanted = {s.upper() for s in symbols}
-            companies = [c for c in companies if (c.get("symbol") or c.get("code") or "").upper() in wanted]
+        if companies is None:
+            companies = self._collect_companies(symbols=symbols, show_progress=show_progress)
 
         if not companies:
             print("No companies found to collect market cap for!")

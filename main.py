@@ -325,12 +325,17 @@ def cmd_collect_market_cap_history(args):
             dates.append(current)
         current = current - timedelta(days=1)
 
+    # Fetch once, then reuse for all dates (API is current-only).
+    companies = collector._collect_companies(show_progress=not args.no_progress)
     dates = list(reversed(dates))
-    for day in dates:
+    for idx, day in enumerate(dates, start=1):
+        if not args.no_progress:
+            print(f"Saving market cap snapshot {idx}/{len(dates)} for {day}...")
         collector.collect_and_save(
             snapshot_date=day,
             save_history=True,
-            show_progress=not args.no_progress,
+            show_progress=False,
+            companies=companies,
         )
 
 
