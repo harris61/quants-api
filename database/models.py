@@ -5,7 +5,7 @@ Indonesian Stock Market ML Prediction System
 
 from datetime import datetime as dt
 from sqlalchemy import (
-    Column, Integer, String, Float, Date, DateTime,
+    Column, Integer, String, Float, Date, DateTime, Text,
     Boolean, ForeignKey, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, declarative_base
@@ -38,6 +38,7 @@ class Stock(Base):
     insider_trades = relationship("InsiderTrade", back_populates="stock", cascade="all, delete-orphan")
     intraday_prices = relationship("IntradayPrice", back_populates="stock", cascade="all, delete-orphan")
     market_cap_history = relationship("MarketCapHistory", back_populates="stock", cascade="all, delete-orphan")
+    orderbook_snapshots = relationship("OrderBookSnapshot", back_populates="stock", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Stock(symbol='{self.symbol}', name='{self.name}')>"
@@ -362,4 +363,32 @@ class IntradayPrice(Base):
 
     def __repr__(self):
         return f"<IntradayPrice(stock_id={self.stock_id}, datetime='{self.datetime}', close={self.close})>"
+
+
+class OrderBookSnapshot(Base):
+    """Order book snapshot per stock"""
+    __tablename__ = "orderbook_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
+    captured_at = Column(DateTime, nullable=False, default=dt.utcnow)
+    date = Column(Date, nullable=False)
+    source_timestamp = Column(DateTime)
+
+    bids_json = Column(Text)  # JSON-encoded bids
+    asks_json = Column(Text)  # JSON-encoded asks
+    raw_json = Column(Text)   # JSON-encoded full payload
+
+    created_at = Column(DateTime, default=dt.utcnow)
+
+    stock = relationship("Stock", back_populates="orderbook_snapshots")
+
+    __table_args__ = (
+        UniqueConstraint('stock_id', 'captured_at', name='uix_orderbook_stock_captured'),
+        Index('ix_orderbook_stock_date', 'stock_id', 'date'),
+        Index('ix_orderbook_captured', 'captured_at'),
+    )
+
+    def __repr__(self):
+        return f"<OrderBookSnapshot(stock_id={self.stock_id}, captured_at='{self.captured_at}')>"
 

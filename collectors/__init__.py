@@ -7,6 +7,7 @@ from collectors.broker_collector import BrokerSummaryCollector
 from collectors.insider_collector import InsiderTradeCollector
 from collectors.intraday_collector import IntradayCollector
 from collectors.market_cap_collector import MarketCapCollector
+from collectors.orderbook_collector import OrderBookCollector
 
 __all__ = [
     "StockListCollector",
@@ -16,4 +17,5 @@ __all__ = [
     "InsiderTradeCollector",
     "IntradayCollector",
     "MarketCapCollector",
+    "OrderBookCollector",
 ]

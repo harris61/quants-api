@@ -20,6 +20,7 @@ from database.models import (
     InsiderTrade,
     MarketCapHistory,
     IntradayPrice,
+    OrderBookSnapshot,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "InsiderTrade",
     "MarketCapHistory",
     "IntradayPrice",
+    "OrderBookSnapshot",
 ]

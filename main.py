@@ -250,6 +250,22 @@ def cmd_collect_intraday(args):
     collector.collect_and_save(days=args.days)
 
 
+def cmd_collect_orderbook(args):
+    """Collect orderbook snapshots"""
+    from collectors import OrderBookCollector
+
+    init_db()
+    collector = OrderBookCollector()
+
+    symbols = None
+    if args.symbols:
+        symbols = []
+        for item in args.symbols:
+            symbols.extend([s.strip().upper() for s in item.split(",") if s.strip()])
+
+    collector.collect_and_save(symbols=symbols, show_progress=not args.no_progress)
+
+
 def cmd_collect_foreign(args):
     """Collect foreign flow data from net foreign endpoints"""
     from collectors import DailyDataCollector
@@ -374,7 +390,30 @@ def cmd_divergence(args):
         parse_codes(args.smart),
         parse_codes(args.retail),
         args.limit,
+        orderbook_bid_gt_ask=args.orderbook_bid_gt_ask,
+        show_orderbook_totals=args.orderbook_totals,
     )
+
+
+def cmd_backtest_divergence(args):
+    """Backtest divergence picks"""
+    from scripts.backtest_divergence import run, parse_codes
+
+    run(
+        args.start,
+        args.end,
+        parse_codes(args.smart),
+        parse_codes(args.retail),
+        args.top,
+        args.lookback_days,
+    )
+
+
+def cmd_migrate_orderbook_wib(args):
+    """Shift orderbook snapshot timestamps to WIB"""
+    from scripts.migrate_orderbook_wib import run
+
+    run(args.apply, args.force_date)
 
 
 def main():
@@ -456,6 +495,11 @@ Examples:
     intraday_parser = subparsers.add_parser("collect-intraday", help="Collect intraday OHLCV data")
     intraday_parser.add_argument("--days", type=int, default=5, help="Days of intraday data to collect")
 
+    # Collect orderbook data command
+    orderbook_parser = subparsers.add_parser("collect-orderbook", help="Collect orderbook snapshots")
+    orderbook_parser.add_argument("--symbols", nargs="+", help="Optional list of symbols (space or comma separated)")
+    orderbook_parser.add_argument("--no-progress", action="store_true", help="Disable progress bar")
+
     # Collect foreign flow data command
     foreign_parser = subparsers.add_parser("collect-foreign", help="Collect foreign flow data")
     foreign_parser.add_argument("--date", type=str, help="Date to collect (YYYY-MM-DD), defaults to today")
@@ -493,6 +537,49 @@ Examples:
     divergence_parser.add_argument("--smart", type=str, required=True, help="Comma-separated smart broker codes")
     divergence_parser.add_argument("--retail", type=str, required=True, help="Comma-separated retail broker codes")
     divergence_parser.add_argument("--limit", type=int, default=10, help="Top N results")
+    divergence_parser.add_argument(
+        "--orderbook-bid-gt-ask",
+        action="store_true",
+        help="Filter to stocks with total bids greater than total asks (latest snapshot on date)",
+    )
+    divergence_parser.add_argument(
+        "--orderbook-totals",
+        action="store_true",
+        help="Show bid/ask totals when using orderbook filter",
+    )
+
+    # Divergence backtest command
+    div_backtest_parser = subparsers.add_parser(
+        "backtest-divergence",
+        help="Backtest divergence picks (next-trading-day open-to-close returns)",
+    )
+    div_backtest_parser.add_argument("--start", type=str, required=True, help="Start date (YYYY-MM-DD)")
+    div_backtest_parser.add_argument("--end", type=str, required=True, help="End date (YYYY-MM-DD)")
+    div_backtest_parser.add_argument("--smart", type=str, required=True, help="Comma-separated smart broker codes")
+    div_backtest_parser.add_argument("--retail", type=str, required=True, help="Comma-separated retail broker codes")
+    div_backtest_parser.add_argument("--top", type=int, default=5, help="Top N picks per day")
+    div_backtest_parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=1,
+        help="Accumulate divergence over the previous N calendar days (default 1)",
+    )
+
+    # Orderbook timestamp migration
+    migrate_orderbook_parser = subparsers.add_parser(
+        "migrate-orderbook-wib",
+        help="Shift orderbook snapshots to WIB timestamps (+07:00)",
+    )
+    migrate_orderbook_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply updates to the database",
+    )
+    migrate_orderbook_parser.add_argument(
+        "--force-date",
+        type=str,
+        help="Override date column with a fixed YYYY-MM-DD value",
+    )
 
     args = parser.parse_args()
 
@@ -508,11 +595,14 @@ Examples:
         "collect-broker": cmd_collect_broker,
         "collect-insider": cmd_collect_insider,
         "collect-intraday": cmd_collect_intraday,
+        "collect-orderbook": cmd_collect_orderbook,
         "collect-foreign": cmd_collect_foreign,
         "collect-market-cap": cmd_collect_market_cap,
         "collect-market-cap-history": cmd_collect_market_cap_history,
         "market-cap-top": cmd_market_cap_report,
         "divergence": cmd_divergence,
+        "backtest-divergence": cmd_backtest_divergence,
+        "migrate-orderbook-wib": cmd_migrate_orderbook_wib,
         "load-historical": cmd_load_historical,
         "predict": cmd_predict,
         "predict-scores": cmd_predict_scores,

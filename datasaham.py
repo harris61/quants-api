@@ -215,6 +215,15 @@ class DatasahamAPI:
         """Data insider trading"""
         return self._request(f"emiten/{symbol}/insider")
 
+    def emiten_orderbook(self, symbol: str) -> Dict[str, Any]:
+        """
+        Order book emiten
+
+        Args:
+            symbol: Kode saham (e.g., "BBCA")
+        """
+        return self._request(f"emiten/{symbol}/orderbook")
+
     # ==================== MARKET DETECTOR ====================
 
     def broker_activity(self, broker_code: str) -> Dict[str, Any]:
