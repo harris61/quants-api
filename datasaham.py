@@ -21,6 +21,8 @@ class DatasahamAPI:
             "x-api-key": api_key,
             "Content-Type": "application/json"
         })
+        self.rate_limit: int = 100
+        self.rate_limit_remaining: int = 100
 
     def _request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Base request method"""
@@ -37,6 +39,13 @@ class DatasahamAPI:
         for attempt in range(retries):
             try:
                 response = self.session.get(url, params=params, timeout=timeout_s)
+                # Update rate limit info from headers
+                rl_limit = response.headers.get("x-ratelimit-limit")
+                rl_remaining = response.headers.get("x-ratelimit-remaining")
+                if rl_limit is not None:
+                    self.rate_limit = int(rl_limit)
+                if rl_remaining is not None:
+                    self.rate_limit_remaining = int(rl_remaining)
                 response.raise_for_status()
                 data = response.json()
                 if not data.get("success"):
@@ -56,6 +65,13 @@ class DatasahamAPI:
                 raise
         if last_exc:
             raise last_exc
+
+    def smart_sleep(self):
+        """Sleep based on API rate limit headers. Fast when quota is available, slower when low."""
+        if self.rate_limit_remaining < 10:
+            time.sleep(1.0)
+        else:
+            time.sleep(0.05)
 
     # ==================== MAIN ====================
 

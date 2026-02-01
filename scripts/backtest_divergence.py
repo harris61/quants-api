@@ -50,6 +50,34 @@ def _get_trading_dates(cur: sqlite3.Cursor, start: str, end: str) -> list[str]:
     return dates
 
 
+def _get_price_change(
+    cur: sqlite3.Cursor,
+    symbol: str,
+    date_str: str,
+    lookback_days: int,
+) -> float | None:
+    """Return price drop % from the recent high within the lookback window."""
+    cur.execute(
+        """
+        SELECT dp.close
+        FROM daily_prices dp
+        JOIN stocks s ON s.id = dp.stock_id
+        WHERE s.symbol = ? AND dp.date <= ?
+        ORDER BY dp.date DESC
+        LIMIT ?
+        """,
+        (symbol, date_str, lookback_days + 1),
+    )
+    rows = [r[0] for r in cur.fetchall() if r[0] is not None]
+    if len(rows) < 2:
+        return None
+    current = rows[0]
+    recent_high = max(rows)
+    if recent_high == 0:
+        return None
+    return (current - recent_high) / recent_high
+
+
 def _get_top_divergence(
     cur: sqlite3.Cursor,
     date_str: str,
@@ -57,6 +85,7 @@ def _get_top_divergence(
     retail_codes: list[str],
     limit: int,
     lookback_days: int,
+    max_drop: float | None = None,
 ) -> list[tuple[str, float | None]]:
     if lookback_days < 1:
         lookback_days = 1
@@ -110,15 +139,27 @@ def _get_top_divergence(
     LIMIT ?
     """
 
+    sql_limit = limit * 3 if max_drop is not None else limit
     params = [
         *smart_date_params,
         *smart_codes,
         *retail_date_params,
         *retail_codes,
-        limit,
+        sql_limit,
     ]
     cur.execute(query, params)
-    return [(row[0], row[1]) for row in cur.fetchall()]
+    results = [(row[0], row[1]) for row in cur.fetchall()]
+
+    if max_drop is not None:
+        filtered = []
+        for symbol, net_div in results:
+            change = _get_price_change(cur, symbol, date_str, lookback_days)
+            if change is not None and change < -max_drop:
+                continue
+            filtered.append((symbol, net_div))
+        results = filtered[:limit]
+
+    return results
 
 
 def _get_close(
@@ -170,6 +211,7 @@ def run(
     retail_codes: list[str],
     top: int,
     lookback_days: int,
+    max_drop: float | None = None,
 ) -> None:
     if not smart_codes or not retail_codes:
         raise SystemExit("Both --smart and --retail broker code lists are required.")
@@ -187,7 +229,7 @@ def run(
     overall_returns = []
     print("date | next_date | symbol | net_divergence | prev_close | close | return")
     for date_str in dates:
-        picks = _get_top_divergence(cur, date_str, smart_codes, retail_codes, top, lookback_days)
+        picks = _get_top_divergence(cur, date_str, smart_codes, retail_codes, top, lookback_days, max_drop)
         if not picks:
             continue
 
@@ -233,6 +275,12 @@ def main() -> None:
         default=1,
         help="Accumulate divergence over the previous N calendar days (default 1)",
     )
+    parser.add_argument(
+        "--max-drop",
+        type=float,
+        default=None,
+        help="Filter out stocks that dropped more than this %% over the lookback period (e.g. 10 for 10%%)",
+    )
     args = parser.parse_args()
 
     run(
@@ -242,6 +290,7 @@ def main() -> None:
         parse_codes(args.retail),
         args.top,
         args.lookback_days,
+        max_drop=args.max_drop / 100 if args.max_drop is not None else None,
     )
 
 

@@ -64,8 +64,29 @@ EQUITY_SYMBOL_REGEX = r"^[A-Z]{4}$"
 # ==================== HOLIDAYS ====================
 # Populate with IDX holidays in YYYY-MM-DD format.
 IDX_HOLIDAYS = [
-    # "2025-12-25",
-    # "2026-01-01",
+    # 2026 IDX holidays
+    "2026-01-01",  # New Year
+    "2026-01-16",  # Isra Mi'raj
+    "2026-02-16",  # Chinese New Year (Eve)
+    "2026-02-17",  # Chinese New Year
+    "2026-03-18",  # Hari Raya Idul Fitri (cuti bersama)
+    "2026-03-19",  # Hari Raya Idul Fitri
+    "2026-03-20",  # Hari Raya Idul Fitri
+    "2026-03-23",  # Hari Raya Idul Fitri (cuti bersama)
+    "2026-03-24",  # Hari Raya Idul Fitri (cuti bersama)
+    "2026-04-03",  # Good Friday
+    "2026-05-01",  # Labour Day
+    "2026-05-14",  # Ascension of Christ
+    "2026-05-15",  # Ascension of Christ (cuti bersama)
+    "2026-05-27",  # Hari Raya Idul Adha
+    "2026-05-28",  # Hari Raya Idul Adha (cuti bersama)
+    "2026-06-01",  # Pancasila Day
+    "2026-06-16",  # Islamic New Year
+    "2026-08-17",  # Independence Day
+    "2026-08-25",  # Maulid Nabi Muhammad
+    "2026-12-24",  # Christmas (cuti bersama)
+    "2026-12-25",  # Christmas
+    "2026-12-31",  # New Year's Eve (cuti bersama)
 ]
 
 # ==================== NOTIFICATIONS ====================

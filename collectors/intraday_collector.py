@@ -201,7 +201,7 @@ class IntradayCollector:
                 else:
                     stats["success"] += 1  # No intraday data is valid
 
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"Error collecting intraday data for {symbol}: {e}")

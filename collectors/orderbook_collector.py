@@ -132,7 +132,7 @@ class OrderBookCollector:
                     stats["records"] += 1
                     stats["success"] += 1
 
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
             except Exception as exc:
                 print(f"Error collecting orderbook for {symbol}: {exc}")
                 stats["failed"] += 1

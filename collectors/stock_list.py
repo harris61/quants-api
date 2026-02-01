@@ -44,7 +44,7 @@ class StockListCollector:
             subsector_id = subsector.get("id")
             companies = self.get_companies_by_subsector(sector_id, subsector_id)
             all_companies.extend(companies)
-            time.sleep(API_RATE_LIMIT)
+            self.api.smart_sleep()
         return all_companies
 
     def get_subsectors_by_sector(self, sector_id: str) -> List[Dict[str, Any]]:
@@ -102,7 +102,7 @@ class StockListCollector:
                         })
 
                 # Rate limiting
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"Error collecting stocks from sector {sector_id}: {e}")

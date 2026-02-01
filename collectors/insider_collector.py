@@ -236,7 +236,7 @@ class InsiderTradeCollector:
                     # No insider data is common - not a failure
                     stats["success"] += 1
 
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"Error collecting insider data for {symbol}: {e}")

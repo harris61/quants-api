@@ -193,8 +193,7 @@ class DailyDataCollector:
                 else:
                     stats["failed"] += 1
 
-                # Rate limiting
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"Error collecting data for {symbol}: {e}")
@@ -424,7 +423,7 @@ class DailyDataCollector:
                             stats["records_updated"] += 1
 
                 stats["stocks_processed"] += 1
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 if show_progress:

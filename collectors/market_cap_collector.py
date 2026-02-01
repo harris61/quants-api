@@ -87,7 +87,7 @@ class MarketCapCollector:
                     continue
                 result = self.api.sector_subsector_companies(sector_id, subsector_id)
                 companies.extend(self._extract_list(result))
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
         return companies
 
     def _collect_companies(

@@ -240,7 +240,7 @@ class BrokerSummaryCollector:
                 else:
                     stats["success"] += 1  # No broker data is valid
 
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"Error collecting broker data for {symbol}: {e}")

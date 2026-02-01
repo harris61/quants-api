@@ -117,8 +117,7 @@ class HistoricalDataLoader:
                 else:
                     stats["failed"] += 1
 
-                # Rate limiting
-                time.sleep(API_RATE_LIMIT)
+                self.api.smart_sleep()
 
             except Exception as e:
                 print(f"\nError loading data for {symbol}: {e}")

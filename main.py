@@ -392,6 +392,9 @@ def cmd_divergence(args):
         args.limit,
         orderbook_bid_gt_ask=args.orderbook_bid_gt_ask,
         show_orderbook_totals=args.orderbook_totals,
+        max_drop=args.max_drop / 100 if args.max_drop is not None else None,
+        max_drop_days=args.max_drop_days,
+        lookback_days=args.lookback_days,
     )
 
 
@@ -406,6 +409,7 @@ def cmd_backtest_divergence(args):
         parse_codes(args.retail),
         args.top,
         args.lookback_days,
+        max_drop=args.max_drop / 100 if args.max_drop is not None else None,
     )
 
 
@@ -547,6 +551,24 @@ Examples:
         action="store_true",
         help="Show bid/ask totals when using orderbook filter",
     )
+    divergence_parser.add_argument(
+        "--max-drop",
+        type=float,
+        default=None,
+        help="Filter out stocks that dropped more than this %% (e.g. 10 for 10%%)",
+    )
+    divergence_parser.add_argument(
+        "--max-drop-days",
+        type=int,
+        default=5,
+        help="Lookback days for the max-drop filter (default 5)",
+    )
+    divergence_parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=1,
+        help="Accumulate divergence over the previous N calendar days (default 1)",
+    )
 
     # Divergence backtest command
     div_backtest_parser = subparsers.add_parser(
@@ -563,6 +585,12 @@ Examples:
         type=int,
         default=1,
         help="Accumulate divergence over the previous N calendar days (default 1)",
+    )
+    div_backtest_parser.add_argument(
+        "--max-drop",
+        type=float,
+        default=None,
+        help="Filter out stocks that dropped more than this %% over the lookback period (e.g. 10 for 10%%)",
     )
 
     # Orderbook timestamp migration
