@@ -99,6 +99,13 @@ LOG_FILE = LOGS_DIR / "quants.log"
 # Broker summary collection
 BROKER_COLLECTION_ENABLED = True
 
+# Orderbook collection (snapshots at runtime, no historical backfill)
+ORDERBOOK_COLLECTION_ENABLED = True
+ORDERBOOK_SCHEDULE_ENABLED = True
+ORDERBOOK_INTERVAL_MINUTES = 60
+ORDERBOOK_START_TIME = "09:00"  # Local time
+ORDERBOOK_END_TIME = "16:00"    # Local time
+
 # Insider trading collection (less frequent)
 INSIDER_COLLECTION_ENABLED = True
 INSIDER_COLLECTION_DAY = 0  # Monday (0=Mon, 6=Sun)

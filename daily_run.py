@@ -15,6 +15,7 @@ from collectors import (
     DailyDataCollector,
     HistoricalDataLoader,
     BrokerSummaryCollector,
+    OrderBookCollector,
 )
 from models.rule_based import RuleBasedPredictor
 from notifications import TelegramNotifier
@@ -28,6 +29,11 @@ from config import (
     DIVERGENCE_TOP_N,
     DIVERGENCE_SMART_BROKERS,
     DIVERGENCE_RETAIL_BROKERS,
+    ORDERBOOK_COLLECTION_ENABLED,
+    ORDERBOOK_SCHEDULE_ENABLED,
+    ORDERBOOK_INTERVAL_MINUTES,
+    ORDERBOOK_START_TIME,
+    ORDERBOOK_END_TIME,
 )
 
 # Setup logging
@@ -136,6 +142,21 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
             logger.error(f"Broker summary collection failed: {e}")
             results["errors"].append(f"Broker summary: {e}")
 
+    # Step 1c2: Collect orderbook snapshots
+    if ORDERBOOK_COLLECTION_ENABLED:
+        logger.info("\n[Step 1c2] Collecting orderbook snapshots...")
+        try:
+            orderbook_collector = OrderBookCollector()
+            orderbook_stats = orderbook_collector.collect_and_save(show_progress=False)
+            results["orderbook_stats"] = orderbook_stats
+            logger.info(
+                f"Orderbook: {orderbook_stats['success']} stocks, "
+                f"{orderbook_stats['records']} records"
+            )
+        except Exception as e:
+            logger.error(f"Orderbook collection failed: {e}")
+            results["errors"].append(f"Orderbook: {e}")
+
     # Step 1d: Divergence analysis
     if DIVERGENCE_ENABLED:
         logger.info("\n[Step 1d] Running divergence analysis...")
@@ -236,6 +257,47 @@ def run_daily_workflow(send_telegram: bool = True) -> dict:
     return results
 
 
+def _is_within_orderbook_window(now: datetime) -> bool:
+    """Return True when within configured orderbook collection window."""
+    start = datetime.strptime(ORDERBOOK_START_TIME, "%H:%M").time()
+    end = datetime.strptime(ORDERBOOK_END_TIME, "%H:%M").time()
+    return start <= now.time() <= end
+
+
+def run_orderbook_snapshot() -> dict:
+    """Collect live orderbook snapshots (no historical backfill)."""
+    results = {"status": "started", "errors": []}
+
+    if not ORDERBOOK_COLLECTION_ENABLED:
+        results["status"] = "disabled"
+        return results
+
+    if not is_trading_day():
+        results["status"] = "skipped_non_trading_day"
+        return results
+
+    if not _is_within_orderbook_window(datetime.now()):
+        results["status"] = "skipped_outside_window"
+        return results
+
+    try:
+        init_db()
+        orderbook_collector = OrderBookCollector()
+        orderbook_stats = orderbook_collector.collect_and_save(show_progress=False)
+        results["orderbook_stats"] = orderbook_stats
+        results["status"] = "completed"
+        logger.info(
+            f"Orderbook: {orderbook_stats['success']} stocks, "
+            f"{orderbook_stats['records']} records"
+        )
+    except Exception as e:
+        logger.error(f"Orderbook collection failed: {e}")
+        results["errors"].append(f"Orderbook: {e}")
+        results["status"] = "failed"
+
+    return results
+
+
 def run_scheduled():
     """Run with scheduler - executes daily at specified time"""
 
@@ -246,6 +308,8 @@ def run_scheduled():
     logger.info("Press Ctrl+C to stop.")
 
     schedule.every().day.at(schedule_time).do(run_daily_workflow)
+    if ORDERBOOK_SCHEDULE_ENABLED:
+        schedule.every(ORDERBOOK_INTERVAL_MINUTES).minutes.do(run_orderbook_snapshot)
 
     # Also run immediately if it's past schedule time on a trading day
     now = datetime.now()
