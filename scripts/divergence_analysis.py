@@ -164,6 +164,27 @@ def run(
     smart_placeholders = ",".join(["?"] * len(smart_codes))
     retail_placeholders = ",".join(["?"] * len(retail_codes))
 
+    orderbook_totals = {}
+    orderbook_ok = set()
+    if orderbook_bid_gt_ask:
+        orderbook_totals = _load_orderbook_totals(cur, date_str)
+        for stock_id, totals in orderbook_totals.items():
+            if not totals:
+                continue
+            bid_total, ask_total = totals
+            if bid_total is None or ask_total is None:
+                continue
+            if bid_total > ask_total:
+                orderbook_ok.add(stock_id)
+        if not orderbook_ok:
+            print(f"Top {limit} net divergence for {date_str}")
+            print("symbol | raw_net_divergence | market_cap | net_divergence")
+            conn.close()
+            return
+
+    orderbook_placeholders = ",".join(["?"] * len(orderbook_ok)) if orderbook_ok else ""
+    orderbook_filter = f"AND s.id IN ({orderbook_placeholders})" if orderbook_ok else ""
+
     query = f"""
     WITH smart AS (
       SELECT bs.stock_id,
@@ -183,7 +204,8 @@ def run(
         AND bs.broker_code IN ({retail_placeholders})
       GROUP BY bs.stock_id
     )
-    SELECT s.symbol,
+    SELECT s.id,
+           s.symbol,
            ((COALESCE(sm.smart_buy,0) - COALESCE(sm.smart_sell,0))
              - (COALESCE(rt.retail_buy,0) - COALESCE(rt.retail_sell,0))) AS raw_net_divergence,
            s.market_cap,
@@ -195,6 +217,7 @@ def run(
     LEFT JOIN smart sm ON sm.stock_id = s.id
     LEFT JOIN retail rt ON rt.stock_id = s.id
     WHERE s.is_active = 1
+      {orderbook_filter}
       AND (sm.smart_buy IS NOT NULL OR sm.smart_sell IS NOT NULL
            OR rt.retail_buy IS NOT NULL OR rt.retail_sell IS NOT NULL)
     ORDER BY net_divergence DESC
@@ -202,7 +225,14 @@ def run(
     """
 
     sql_limit = limit * 3 if max_drop is not None else limit
-    params = [*smart_date_params, *smart_codes, *retail_date_params, *retail_codes, sql_limit]
+    params = [
+        *smart_date_params,
+        *smart_codes,
+        *retail_date_params,
+        *retail_codes,
+        *orderbook_ok,
+        sql_limit,
+    ]
     cur.execute(query, params)
     rows = cur.fetchall()
 
@@ -216,35 +246,13 @@ def run(
             filtered.append(row)
         rows = filtered[:limit]
 
-    orderbook_totals = {}
-    if orderbook_bid_gt_ask:
-        orderbook_totals = _load_orderbook_totals(cur, date_str)
-        filtered = []
-        for symbol, raw_net, market_cap, net_div in rows:
-            cur.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol,))
-            stock_row = cur.fetchone()
-            if not stock_row:
-                continue
-            stock_id = stock_row[0]
-            totals = orderbook_totals.get(stock_id)
-            if not totals:
-                continue
-            bid_total, ask_total = totals
-            if bid_total is None or ask_total is None:
-                continue
-            if bid_total > ask_total:
-                filtered.append((symbol, raw_net, market_cap, net_div))
-        rows = filtered
-
     print(f"Top {limit} net divergence for {date_str}")
     if show_orderbook_totals and orderbook_bid_gt_ask:
         print("symbol | raw_net_divergence | market_cap | net_divergence | bid_total | ask_total")
-        for symbol, raw_net, market_cap, net_div in rows:
-            cur.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol,))
-            stock_row = cur.fetchone()
+        for stock_id, symbol, raw_net, market_cap, net_div in rows:
             bid_total, ask_total = (None, None)
-            if stock_row:
-                totals = orderbook_totals.get(stock_row[0])
+            if stock_id:
+                totals = orderbook_totals.get(stock_id)
                 if totals:
                     bid_total, ask_total = totals
             print(
@@ -253,7 +261,7 @@ def run(
             )
     else:
         print("symbol | raw_net_divergence | market_cap | net_divergence")
-        for symbol, raw_net, market_cap, net_div in rows:
+        for _, symbol, raw_net, market_cap, net_div in rows:
             print(f"{symbol} | {fmt_int(raw_net)} | {fmt_int(market_cap)} | {fmt_float(net_div)}")
 
     conn.close()
